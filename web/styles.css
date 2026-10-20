@@ -128,9 +128,49 @@ tr.flash td { animation: flash 1.6s ease-out; }
 .good { color: var(--ok); }
 .compare-list { margin: 6px 0 14px; padding-left: 18px; font-size: 14px; }
 
+.tabs { display: flex; gap: 4px; max-width: 1100px; margin: 0 auto; padding: 14px 16px 0; }
+.tab { font: 500 14px/1 Inter, system-ui, sans-serif; color: var(--muted); background: none; border: 1px solid transparent; border-radius: 7px; padding: 9px 14px; cursor: pointer; display: flex; gap: 6px; align-items: center; }
+.tab:hover { color: var(--ink); }
+.tab[aria-current="page"] { color: var(--ink); background: var(--card); border-color: var(--line); }
+.tab .pill:empty { display: none; }
+.view { display: grid; gap: 16px; min-width: 0; }
+.view[hidden] { display: none; }
+
+.driver-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
+.driver-form .wide { grid-column: 1 / -1; }
+.driver-form .field input:not([type="radio"]) { width: 100%; }
+.driver-form fieldset { border: none; margin: 0; padding: 0; min-width: 0; }
+.driver-form legend { padding: 0; margin-bottom: 4px; }
+.req { color: var(--error); font-size: 12px; }
+.range { display: flex !important; flex-wrap: wrap; align-items: center; gap: 8px; }
+.range legend { flex-basis: 100%; }
+.range input { flex: 1 1 110px; width: auto !important; }
+.speed { display: flex !important; flex-wrap: wrap; gap: 8px; }
+.speed legend { flex-basis: 100%; }
+.speed label { white-space: nowrap; display: flex; align-items: center; gap: 6px; color: var(--ink); font-size: 14px; border: 1px solid var(--line); border-radius: 7px; padding: 7px 12px; cursor: pointer; }
+.speed label:has(input:checked) { border-color: var(--ink); background: var(--bg); }
+.speed input { margin: 0; }
+.field input[aria-invalid="true"] { border-color: var(--error); }
+.form-errors { margin: 0; padding: 8px 12px 8px 28px; border-radius: 7px; background: var(--error-bg); color: var(--error); font-size: 14px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips:empty { display: none; }
+.chip { font-size: 12px; font-weight: 500; background: var(--info-bg); color: var(--info); border-radius: 99px; padding: 2px 9px; }
+
+.drivers { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.drivers li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 12px; align-items: start; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.drivers li.off { opacity: .6; }
+.drivers li.empty { display: block; color: var(--muted); border-style: dashed; text-align: center; padding: 22px; }
+.drivers input[type="checkbox"] { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--ink); }
+.drivers .who { display: grid; gap: 3px; min-width: 0; }
+.drivers .dname { font-weight: 600; background: none; border: none; padding: 0; font: inherit; font-weight: 600; color: var(--ink); text-align: left; cursor: pointer; }
+.drivers .dname:hover { text-decoration: underline; }
+.drivers .dmeta { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.drivers .dmeta b { color: var(--ink); font-weight: 500; }
+
 .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 8px; font-size: 14px; max-width: calc(100% - 32px); }
 
 @media (max-width: 600px) {
   .controls { align-items: stretch; }
   .actions .btn { flex: 1; }
+  .driver-form { grid-template-columns: minmax(0, 1fr); }
 }

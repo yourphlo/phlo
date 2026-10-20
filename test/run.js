@@ -1,4 +1,4 @@
-// Tests for the shared PHLO logic (web/core.js + web/stores.js).
+// Tests for the shared PHLO logic (web/core.js + web/stores.js + web/drivers.js).
 //   node test/run.js            unit checks, plus sheet-snapshot checks if test/fixtures/ exists
 //   node test/run.js --print    also print the rows built from the snapshots
 // The snapshots hold patient data, so they stay local (see .gitignore); CI runs the unit checks only.
@@ -10,7 +10,7 @@ const { execFileSync } = require('child_process');
 const root = path.join(__dirname, '..');
 const ctx = {};
 vm.createContext(ctx);
-for (const f of ['web/stores.js', 'web/core.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
+for (const f of ['web/stores.js', 'web/core.js', 'web/drivers.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
 
 let failures = 0;
 const eq = (a, b, msg) => {
@@ -61,6 +61,22 @@ const cmp = ctx.phloCompare(
   [['1000017,LI,Z', '1 W LN TOWN CA 91000', 'EM', ''], ['1000018,C,C', '2 E AVE TOWN CA 91000', 'EM', '']],
   [['1000018,C,C', '2 E AVE TOWN CA 91000', 'EM', ''], ['999999,X', '1 A ST TOWN CA 91000', 'EM', '']]);
 eq(cmp.stores.map(s => [s.code, s.missing.map(r => r[0]), s.extra.map(r => r[0])]), [['EM', ['1000017,LI,Z'], ['999999,X']]], 'compare');
+
+/* ---------- driver profiles ---------- */
+eq(['9:5', '0905', '9:05 am', '1:30 PM', '12 am', '24:00', 'noon', ''].map(ctx.phloParseTime), [null, '09:05', '09:05', '13:30', '00:00', null, null, ''], 'parse time');
+eq(ctx.phloParseTypes('FRIDGE, fridge ,FRIDGE,, DME'), ['FRIDGE', 'fridge', 'DME'], 'types are case sensitive + deduped');
+const drv = ctx.phloNormalizeDriver({ id: 'a', name: '  Ana  Ruiz ', startAddress: '1 Main St', capacity: '40', speed: 'fast', availableFrom: '8:00 am', availableTo: '5 pm', lunchFrom: '12:00', lunchTo: '12:30', types: 'FRIDGE' });
+eq([drv.name, drv.capacity, drv.speed, drv.availableFrom, drv.availableTo, drv.types], ['Ana Ruiz', 40, 'FAST', '08:00', '17:00', ['FRIDGE']], 'normalize driver');
+eq(ctx.phloValidateDriver(drv, []), [], 'valid driver');
+eq(ctx.phloNormalizeDriver({ name: 'x', speed: 'turbo' }).speed, 'NORMAL', 'unknown speed -> NORMAL');
+const bad = ctx.phloNormalizeDriver({ id: 'b', name: 'ana ruiz', capacity: '0', mobile: '555-01', availableFrom: '17:00', availableTo: '08:00', lunchFrom: '12:00' });
+eq(ctx.phloValidateDriver(bad, [drv]).map(e => e.field), ['name', 'startAddress', 'availableTo', 'lunchTo', 'capacity', 'mobile'], 'driver errors');
+const lunchOut = ctx.phloNormalizeDriver({ name: 'B', startAddress: 'x', availableFrom: '09:00', availableTo: '13:00', lunchFrom: '13:00', lunchTo: '13:30' });
+eq(ctx.phloValidateDriver(lunchOut, []).map(e => e.field), ['lunchFrom'], 'lunch outside hours');
+eq(ctx.phloDriverRows([drv])[1], ['Ana Ruiz', '1 Main St', '', '08:00', '17:00', '', 40, 'FRIDGE', 'FAST (190%)', '12:00', '12:30'], 'driver export row');
+const roster = ctx.phloDriversData({ drivers: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], roster: { '2026-10-19': ['a'], '2026-10-21': ['b', 'gone'], bad: ['a'] } });
+eq([ctx.phloRosterFor(roster, '2026-10-18'), ctx.phloRosterFor(roster, '2026-10-20'), ctx.phloRosterFor(roster, '2026-10-21')], [['a', 'b'], ['a'], ['b']], 'roster fallback');
+eq(Object.keys(roster.roster), ['2026-10-19', '2026-10-21'], 'roster drops bad keys');
 
 try { execFileSync('node', [path.join(root, 'scripts/sync-apps-script.js'), '--check'], { stdio: 'inherit' }); }
 catch (e) { failures++; }

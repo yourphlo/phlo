@@ -1,12 +1,14 @@
 /* PHLO master web app: reads the store sheets with the signed-in Google account,
  * builds the master with core.js, shows checks, and downloads the upload .xlsx.
+ * Also keeps the driver profiles, saved in the user's own Google Drive (hidden app folder).
  * Nothing is sent anywhere except Google's own APIs. */
 (function () {
   'use strict';
 
   var CFG = window.PHLO_CONFIG || {};
   var TZ = CFG.timeZone || 'America/Los_Angeles';
-  var SCOPES = 'https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/drive.readonly';
+  // drive.appdata = a private app folder in the user's Drive, used only for the saved driver profiles.
+  var SCOPES = 'https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.appdata';
   var SHEETS = 'https://sheets.googleapis.com/v4/spreadsheets/';
   var DRIVE = 'https://www.googleapis.com/drive/v3/files';
 
@@ -93,6 +95,7 @@
     $('signin').hidden = true;
     $('signout').hidden = false;
     $('build').disabled = false;
+    loadDriversFromDrive();
     api('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)').then(function (r) {
       $('who').textContent = r.user && r.user.emailAddress || '';
     }).catch(function () { /* not important */ });
@@ -102,6 +105,8 @@
     if (state.token && google.accounts.oauth2.revoke) google.accounts.oauth2.revoke(state.token, function () {});
     state.token = null;
     $('signin').hidden = false; $('signout').hidden = true; $('build').disabled = true; $('who').textContent = '';
+    drv.fileId = null; drv.synced = false;
+    renderSyncNote();
   }
 
   function withToken() {
@@ -109,9 +114,11 @@
     return new Promise(function (resolve) { signIn(resolve); });
   }
 
-  function api(url, asBuffer) {
+  function api(url, asBuffer, init) {
     return withToken().then(function () {
-      return fetch(url, { headers: { Authorization: 'Bearer ' + state.token } });
+      init = init || {};
+      init.headers = Object.assign({ Authorization: 'Bearer ' + state.token }, init.headers || {});
+      return fetch(url, init);
     }).then(function (res) {
       if (!res.ok) {
         return res.json().catch(function () { return {}; }).then(function (j) {
@@ -395,6 +402,256 @@
     if (!problems && !result.checks.length) out.appendChild(el('p', { class: 'good', text: 'The file matches the store sheets. Nothing to fix.' }));
   }
 
+  /* ---------------- driver profiles ---------------- */
+
+  // Saved as one JSON file in the user's Drive appDataFolder (private to this app, not visible in
+  // Drive's file list), with a copy in this browser so the list shows before signing in.
+  var DRIVERS_FILE = 'phlo-drivers.json';
+  var LOCAL_KEY = 'phlo.drivers';
+  var drv = { data: phloDriversData(null), fileId: null, synced: false, saving: null, pending: false, editing: null };
+
+  function loadLocalDrivers() {
+    try { drv.data = phloDriversData(JSON.parse(localStorage.getItem(LOCAL_KEY) || 'null')); } catch (e) { /* storage blocked or bad JSON */ }
+  }
+  function saveLocalDrivers() {
+    try { localStorage.setItem(LOCAL_KEY, JSON.stringify(drv.data)); } catch (e) { /* storage blocked */ }
+  }
+
+  function findDriversFile() {
+    var url = DRIVE + '?spaces=appDataFolder&fields=files(id,modifiedTime)&pageSize=1&q=' +
+      encodeURIComponent("name = '" + DRIVERS_FILE + "' and trashed = false");
+    return api(url).then(function (r) { return r.files && r.files[0] ? r.files[0].id : null; });
+  }
+
+  function loadDriversFromDrive() {
+    drv.synced = false; renderSyncNote('Loading drivers from your Google account…');
+    findDriversFile().then(function (id) {
+      drv.fileId = id;
+      return id ? api(DRIVE + '/' + id + '?alt=media') : null;
+    }).then(function (remote) {
+      var local = drv.data;
+      remote = remote ? phloDriversData(remote) : null;
+      // Keep whichever copy was changed last; push the local one up if it is newer.
+      if (remote && (remote.updatedAt || '') >= (local.updatedAt || '')) {
+        drv.data = remote; saveLocalDrivers(); drv.synced = true;
+      } else if (local.drivers.length || remote) {
+        return pushDrivers();
+      } else {
+        drv.synced = true;
+      }
+    }).then(function () {
+      renderDrivers();
+    }).catch(function (e) {
+      renderSyncNote('Could not load drivers from Google (' + e.message + '). Changes are kept on this device for now.');
+    });
+  }
+
+  function pushDrivers() {
+    // One save at a time; if more edits arrive meanwhile, save again once it finishes.
+    if (drv.saving) { drv.pending = true; return drv.saving; }
+    var body = JSON.stringify(drv.data);
+    var req;
+    if (drv.fileId) {
+      req = api('https://www.googleapis.com/upload/drive/v3/files/' + drv.fileId + '?uploadType=media&fields=id', false,
+        { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: body });
+    } else {
+      var boundary = 'phlo' + Date.now();
+      var multipart = '--' + boundary + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' +
+        JSON.stringify({ name: DRIVERS_FILE, parents: ['appDataFolder'], mimeType: 'application/json' }) +
+        '\r\n--' + boundary + '\r\nContent-Type: application/json\r\n\r\n' + body + '\r\n--' + boundary + '--';
+      req = api('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', false,
+        { method: 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + boundary }, body: multipart });
+    }
+    renderSyncNote('Saving…');
+    drv.saving = req.then(function (r) {
+      drv.fileId = r.id; drv.synced = true;
+    }).catch(function (e) {
+      drv.synced = false;
+      toast('Could not save drivers to Google: ' + e.message);
+    }).then(function () {
+      drv.saving = null;
+      if (drv.pending) { drv.pending = false; return pushDrivers(); }
+      renderSyncNote();
+    });
+    return drv.saving;
+  }
+
+  function signedIn() { return !!state.token && Date.now() < state.tokenExpires; }
+
+  function commitDrivers() {
+    // Only keep the last 60 days of "who's working" picks.
+    var cutoff = isoDate(phloAddDays(todayLocal(), -60));
+    Object.keys(drv.data.roster).forEach(function (k) { if (k < cutoff) delete drv.data.roster[k]; });
+    drv.data.updatedAt = new Date().toISOString();
+    saveLocalDrivers();
+    drv.synced = false;
+    renderDrivers();
+    if (signedIn()) pushDrivers();
+  }
+
+  function renderSyncNote(msg) {
+    var note = $('sync-note');
+    if (msg) { note.textContent = msg; return; }
+    if (drv.saving) note.textContent = 'Saving…';
+    else if (drv.synced && signedIn()) note.textContent = 'Saved to your Google account' + ($('who').textContent ? ' (' + $('who').textContent + ')' : '') + '. Sign in on any computer to see these drivers.';
+    else note.textContent = 'Saved on this device only. Sign in with Google to keep drivers in your Google account.';
+  }
+
+  function rosterIso() { return $('roster-date').value || isoDate(phloAddDays(todayLocal(), 1)); }
+
+  function renderDrivers() {
+    var data = drv.data, iso = rosterIso();
+    var working = phloRosterFor(data, iso);
+    var ul = $('drivers');
+    ul.textContent = '';
+    var sorted = data.drivers.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
+    if (!sorted.length) ul.appendChild(el('li', { class: 'empty', text: 'No drivers yet. Click "Add driver" to create the first profile.' }));
+    sorted.forEach(function (d) {
+      var on = working.indexOf(d.id) >= 0;
+      var box = el('input', { type: 'checkbox', 'aria-label': d.name + ' is working' });
+      box.checked = on;
+      box.addEventListener('change', function () { toggleWorking(d.id, box.checked); });
+      var name = el('button', { class: 'dname', type: 'button', text: d.name });
+      name.addEventListener('click', function () { openDriverForm(d); });
+      var bits = [];
+      var part = function (label, value) { if (value) bits.push(el('span', {}, [label ? label + ' ' : '', el('b', { text: value })])); };
+      part('', d.startAddress + (d.endAddress && d.endAddress !== d.startAddress ? ' → ' + d.endAddress : ''));
+      var meta2 = [];
+      var part2 = function (label, value) { if (value) meta2.push(el('span', {}, [label + ' ', el('b', { text: value })])); };
+      part2('Hours', d.availableFrom && d.availableTo ? d.availableFrom + '–' + d.availableTo : '');
+      part2('Lunch', d.lunchFrom && d.lunchTo ? d.lunchFrom + '–' + d.lunchTo : '');
+      part2('Capacity', d.capacity === '' ? '' : String(d.capacity));
+      part2('Speed', d.speed !== 'NORMAL' ? d.speed : '');
+      part2('Mobile', d.mobile);
+      var line2 = el('div', { class: 'dmeta' });
+      meta2.forEach(function (n, i) { if (i) line2.appendChild(document.createTextNode(' · ')); line2.appendChild(n); });
+      var chips = el('div', { class: 'chips' }, d.types.map(function (t) { return el('span', { class: 'chip', text: t }); }));
+      var del = el('button', { class: 'del', type: 'button', title: 'Delete driver', 'aria-label': 'Delete ' + d.name, text: '×' });
+      del.addEventListener('click', function () { deleteDriver(d); });
+      ul.appendChild(el('li', { class: on ? '' : 'off' }, [
+        box,
+        el('div', { class: 'who' }, [name, el('div', { class: 'dmeta' }, bits), meta2.length ? line2 : null, chips]),
+        del
+      ]));
+    });
+    var label = working.length + ' of ' + data.drivers.length + ' working ' + niceDate(fromIso(iso));
+    $('roster-count').textContent = data.drivers.length ? label : '';
+    $('drivers-tab-count').textContent = data.drivers.length ? String(data.drivers.length) : '';
+    $('download-drivers').disabled = !working.length;
+    renderSyncNote();
+  }
+
+  function toggleWorking(id, on) {
+    var iso = rosterIso();
+    var list = phloRosterFor(drv.data, iso).filter(function (x) { return x !== id; });
+    if (on) list.push(id);
+    drv.data.roster[iso] = list;
+    commitDrivers();
+  }
+
+  function deleteDriver(d) {
+    if (!confirm('Delete the driver profile for ' + d.name + '?')) return;
+    drv.data.drivers = drv.data.drivers.filter(function (x) { return x.id !== d.id; });
+    Object.keys(drv.data.roster).forEach(function (k) {
+      drv.data.roster[k] = drv.data.roster[k].filter(function (x) { return x !== d.id; });
+    });
+    if (drv.editing && drv.editing.id === d.id) closeDriverForm();
+    commitDrivers();
+    toast('Deleted ' + d.name);
+  }
+
+  var FORM_FIELDS = ['name', 'startAddress', 'endAddress', 'availableFrom', 'availableTo', 'mobile', 'capacity', 'types', 'lunchFrom', 'lunchTo'];
+
+  function openDriverForm(d) {
+    var f = $('driver-form');
+    drv.editing = d || null;
+    f.reset();
+    FORM_FIELDS.forEach(function (k) {
+      var v = d ? d[k] : '';
+      f.elements[k].value = Array.isArray(v) ? v.join(', ') : (v == null ? '' : String(v));
+      f.elements[k].removeAttribute('aria-invalid');
+    });
+    var speed = d ? d.speed : 'NORMAL';
+    Array.prototype.forEach.call(f.elements.speed, function (r) { r.checked = r.value === speed; });
+    $('driver-form-title').textContent = d ? 'Edit ' + d.name : 'Add driver';
+    $('driver-errors').hidden = true;
+    renderTypesPreview();
+    $('driver-form-card').hidden = false;
+    $('driver-form-card').scrollIntoView({ block: 'start', behavior: 'smooth' });
+    f.elements.name.focus({ preventScroll: true });
+  }
+
+  function closeDriverForm() {
+    drv.editing = null;
+    $('driver-form-card').hidden = true;
+  }
+
+  function renderTypesPreview() {
+    var types = phloParseTypes($('driver-form').elements.types.value);
+    var box = $('types-preview');
+    box.textContent = '';
+    types.forEach(function (t) { box.appendChild(el('span', { class: 'chip', text: t })); });
+  }
+
+  function saveDriverForm(e) {
+    e.preventDefault();
+    var f = $('driver-form');
+    var raw = { id: drv.editing ? drv.editing.id : null };
+    FORM_FIELDS.forEach(function (k) { raw[k] = f.elements[k].value; });
+    var checked = f.querySelector('input[name="speed"]:checked');
+    raw.speed = checked ? checked.value : 'NORMAL';
+    var d = phloNormalizeDriver(raw);
+    var errs = phloValidateDriver(d, drv.data.drivers);
+    FORM_FIELDS.forEach(function (k) { f.elements[k].removeAttribute('aria-invalid'); });
+    var box = $('driver-errors');
+    if (errs.length) {
+      box.textContent = '';
+      errs.forEach(function (x) {
+        box.appendChild(el('li', { text: x.message }));
+        if (f.elements[x.field]) f.elements[x.field].setAttribute('aria-invalid', 'true');
+      });
+      box.hidden = false;
+      var first = f.elements[errs[0].field];
+      if (first && first.focus) first.focus();
+      return;
+    }
+    var isNew = !drv.editing;
+    if (isNew) {
+      drv.data.drivers.push(d);
+      // A new driver works on the date being viewed.
+      var iso = rosterIso();
+      var list = phloRosterFor(drv.data, iso);
+      if (list.indexOf(d.id) < 0) list.push(d.id);
+      drv.data.roster[iso] = list;
+    } else {
+      drv.data.drivers = drv.data.drivers.map(function (x) { return x.id === d.id ? d : x; });
+    }
+    closeDriverForm();
+    commitDrivers();
+    toast((isNew ? 'Added ' : 'Saved ') + d.name);
+  }
+
+  function downloadDrivers() {
+    var iso = rosterIso();
+    var working = phloRosterFor(drv.data, iso);
+    var list = drv.data.drivers.filter(function (d) { return working.indexOf(d.id) >= 0; })
+      .sort(function (a, b) { return a.name.localeCompare(b.name); });
+    var ws = XLSX.utils.aoa_to_sheet(phloDriverRows(list));
+    ws['!cols'] = [{ wch: 22 }, { wch: 44 }, { wch: 44 }, { wch: 10 }, { wch: 10 }, { wch: 16 }, { wch: 9 }, { wch: 20 }, { wch: 14 }, { wch: 10 }, { wch: 10 }];
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Drivers');
+    XLSX.writeFile(wb, phloFmt(fromIso(iso), 'MM.dd.yy') + '_DRIVERS.xlsx');
+  }
+
+  function showView(name) {
+    document.querySelectorAll('.tab').forEach(function (t) {
+      if (t.getAttribute('data-view') === name) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
+    });
+    $('view-master').hidden = name !== 'master';
+    $('view-drivers').hidden = name !== 'drivers';
+    try { localStorage.setItem('phlo.view', name); } catch (e) { /* storage blocked */ }
+  }
+
   /* ---------------- wire up ---------------- */
 
   function updateWindowNote() {
@@ -429,6 +686,22 @@
     ['dragenter', 'dragover'].forEach(function (t) { drop.addEventListener(t, function (e) { e.preventDefault(); drop.classList.add('over'); }); });
     ['dragleave', 'drop'].forEach(function (t) { drop.addEventListener(t, function () { drop.classList.remove('over'); }); });
     drop.addEventListener('drop', function (e) { e.preventDefault(); if (e.dataTransfer.files[0]) compareFile(e.dataTransfer.files[0]); });
+
+    document.querySelectorAll('.tab').forEach(function (t) {
+      t.addEventListener('click', function () { showView(t.getAttribute('data-view')); });
+    });
+    var view = 'master';
+    try { view = localStorage.getItem('phlo.view') === 'drivers' ? 'drivers' : 'master'; } catch (e) { /* storage blocked */ }
+    showView(view);
+    $('roster-date').value = isoDate(phloAddDays(todayLocal(), 1));
+    $('roster-date').addEventListener('change', renderDrivers);
+    $('add-driver').addEventListener('click', function () { openDriverForm(null); });
+    $('cancel-driver').addEventListener('click', closeDriverForm);
+    $('driver-form').addEventListener('submit', saveDriverForm);
+    $('driver-form').elements.types.addEventListener('input', renderTypesPreview);
+    $('download-drivers').addEventListener('click', downloadDrivers);
+    loadLocalDrivers();
+    renderDrivers();
     initAuth();
   });
 })();
