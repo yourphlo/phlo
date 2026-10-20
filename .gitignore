@@ -1,0 +1,4 @@
+# Sheet snapshots contain patient data - keep them local only
+test/fixtures/
+test/expected-*.json
+*.xlsx
