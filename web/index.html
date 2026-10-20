@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PHLO Master</title>
+  <meta name="description" content="Builds the daily PHLO delivery master from the pharmacy Google Sheets.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='2' width='28' height='28' fill='white' stroke='black' stroke-width='2'/%3E%3Ctext x='16' y='21' font-family='Georgia' font-size='13' text-anchor='middle'%3EPH%3C/text%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand" aria-label="PHLO">
+      <span class="mark">PH</span>
+      <span class="word">PHLO <em>master</em></span>
+    </div>
+    <div class="account">
+      <span id="who" class="muted"></span>
+      <button id="signin" class="btn">Sign in with Google</button>
+      <button id="signout" class="btn ghost" hidden>Sign out</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="setup" class="card" hidden>
+      <h2>One-time setup</h2>
+      <p>This page needs a Google sign-in key (an OAuth client ID) so it can read your store sheets.
+        The steps are in the repo README under <b>Web app setup</b>.</p>
+      <label class="field">OAuth client ID
+        <input id="client-id" placeholder="1234567890-abc.apps.googleusercontent.com" autocomplete="off">
+      </label>
+      <button id="save-client" class="btn">Save</button>
+    </section>
+
+    <section class="card controls">
+      <label class="field">Delivery date
+        <input id="date" type="date">
+      </label>
+      <p class="muted small" id="window-note"></p>
+      <div class="actions">
+        <button id="build" class="btn primary" disabled>Build master</button>
+        <button id="download" class="btn" disabled>Download .xlsx</button>
+      </div>
+    </section>
+
+    <section id="stores-card" class="card" hidden>
+      <h2>Stores</h2>
+      <ul id="stores" class="stores"></ul>
+    </section>
+
+    <section id="checks-card" class="card" hidden>
+      <h2>Check before uploading <span id="checks-count" class="pill"></span></h2>
+      <ul id="checks" class="checks"></ul>
+    </section>
+
+    <section id="table-card" class="card" hidden>
+      <div class="table-head">
+        <h2>Master <span id="row-count" class="pill"></span></h2>
+        <input id="filter" type="search" placeholder="Filter rows…" aria-label="Filter rows">
+      </div>
+      <p class="muted small">Click any cell to edit. Changes go into the download.</p>
+      <div class="table-wrap">
+        <table id="master">
+          <thead><tr><th>#</th><th>NAME</th><th>ADDRESS</th><th>NOTES</th><th>NOTES 2</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="compare-card" class="card" hidden>
+      <h2>Check a finished file</h2>
+      <p class="muted small">Drop your edited upload .xlsx to see RX numbers missing from it or not in the store sheets, plus typos.</p>
+      <label id="drop" class="drop">
+        <input id="compare-file" type="file" accept=".xlsx,.xls,.csv">
+        <span>Choose or drop an .xlsx</span>
+      </label>
+      <div id="compare-out"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="config.js"></script>
+  <script src="stores.js"></script>
+  <script src="core.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

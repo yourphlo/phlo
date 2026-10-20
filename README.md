@@ -3,18 +3,79 @@
 Builds the daily PHLO upload sheet (`NAME | ADDRESS | NOTES | NOTES 2`) from every
 pharmacy's delivery Google Sheet.
 
-## One-time setup (about 5 minutes)
+Two ways to run it (same logic, same results):
+
+- **Web app** (`web/`) - a page published on GitHub Pages. Sign in with Google, pick the
+  delivery date, review the checks, fix anything in the table, download the `.xlsx`.
+  It can also check a finished upload file against the store sheets.
+- **Google Sheets menu** (`apps-script/`) - a PHLO menu inside a Google Sheet.
+
+## Web app
+
+### Daily use
+
+1. Open the page and **Sign in with Google** (the account that can see the store sheets).
+2. Pick the **delivery date** (defaults to tomorrow) and click **Build master**.
+3. Each store shows how many rows it gave and when its sheet was last updated. A store with
+   0 rows or "no file found" probably hasn't entered its list yet.
+4. Go through **Check before uploading**: missing RX numbers, stray letters in RX numbers,
+   ZIP codes that aren't 5 digits, two addresses in one cell, duplicate RX numbers, and the
+   same address on two rows. Click a check to jump to the row.
+5. Click any cell to fix it, or × to delete a row. Then **Download .xlsx**
+   (saved as `10.20.26_UPLOAD.xlsx`).
+6. Optional: drop your hand-edited upload file into **Check a finished file** to see any RX
+   number missing from it, any that isn't in the store sheets, and typos.
+
+Patient data never leaves your browser and Google: the page reads the sheets with your own
+Google sign-in and builds the file locally. Nothing is stored on GitHub.
+
+### Web app setup (one time, about 15 minutes)
+
+**1. Publish the page**
+
+- GitHub Pages needs either a **public** repo (free) or a paid GitHub plan for a private repo.
+  The code has no patient data in it (sheet ids only, which need your Google login to open).
+- Repo **Settings > Pages > Build and deployment > Source: GitHub Actions**.
+- Push to the default branch; the *Test and publish web app* action publishes `web/`.
+  The address is shown on that action and in Settings > Pages
+  (usually `https://yourphlo.github.io/phlo/`).
+
+**2. Create the Google sign-in key (OAuth client ID)** at https://console.cloud.google.com
+
+1. Create a project (e.g. "PHLO").
+2. **APIs & Services > Library**: enable **Google Sheets API** and **Google Drive API**.
+3. **Google Auth Platform** (OAuth consent screen): app name "PHLO Master", your email,
+   audience **External**. Under **Audience > Test users**, add every Google account that will
+   use the page (e.g. yourphlo@gmail.com). Leave the app in *Testing*.
+4. **Data access > Add scopes**: `.../auth/spreadsheets.readonly` and `.../auth/drive.readonly`.
+5. **Clients > Create client > Web application**. Under **Authorized JavaScript origins** add
+   `https://yourphlo.github.io` (and `http://localhost:8000` for testing on a computer).
+   Create, then copy the **Client ID** (ends in `.apps.googleusercontent.com`).
+
+**3. Give the page the client ID** - either paste it into `web/config.js` (`clientId: '...'`)
+and push, or paste it into the setup box the first time you open the page (remembered in that
+browser).
+
+The first sign-in shows "Google hasn't verified this app" because it's your own private app;
+click **Continue**.
+
+To try it on a computer instead: `cd web && python3 -m http.server 8000`, then open
+http://localhost:8000.
+
+## Google Sheets menu: one-time setup (about 5 minutes)
 
 1. In Google Drive create a new Google Sheet, e.g. **PHLO MASTER**.
 2. In that sheet: **Extensions > Apps Script**.
-3. Replace the contents of `Code.gs` with [`apps-script/Code.gs`](apps-script/Code.gs).
+3. Replace the contents of `Code.gs` with [`apps-script/Code.gs`](apps-script/Code.gs), then add
+   two more script files (**+ > Script**) named `Core` and `Stores` and paste in
+   [`apps-script/Core.gs`](apps-script/Core.gs) and [`apps-script/Stores.gs`](apps-script/Stores.gs).
 4. Click the gear (**Project Settings**) > tick **Show "appsscript.json"**, then replace
    `appsscript.json` with [`apps-script/appsscript.json`](apps-script/appsscript.json).
    (This turns on the Drive service needed to read the Arcadia KM2 `.xlsx`.)
 5. Save, reload the spreadsheet. A **PHLO** menu appears. The first run asks you to
    authorize access to your Drive/Sheets.
 
-## Daily use
+### Daily use
 
 - **PHLO > Build master for tomorrow's deliveries** - run in the evening after the stores
   finish entering. Creates a tab named like `10.20.26`.
@@ -46,8 +107,10 @@ For delivery date D:
 
 ## Stores
 
-Configured in the `STORES` list at the top of `Code.gs` (sheet id + which column holds
-what). If a store starts a new spreadsheet, paste its id there. Monthly tabs are found by
+Configured in the `STORES` list in [`web/stores.js`](web/stores.js) (sheet id + which column
+holds what). If a store starts a new spreadsheet, paste its id there. The parsing logic is
+[`web/core.js`](web/core.js). After editing either, run `node scripts/sync-apps-script.js`
+to copy them into `apps-script/`. Monthly tabs are found by
 name (`OCT 2026`, `October 2026`, `RX OCT 2026`, `OCT-2026`, …).
 
 - **BP** has no October sheet in Drive yet. It's set to use the newest spreadsheet whose
@@ -57,5 +120,8 @@ name (`OCT 2026`, `October 2026`, `RX OCT 2026`, `OCT-2026`, …).
 
 ## Tests
 
-`node test/run.js` runs the parsing logic against local sheet snapshots in
-`test/fixtures/` (kept out of git because they hold patient data).
+- `node test/run.js` - logic checks (run by GitHub Actions on every push), plus checks
+  against local sheet snapshots in `test/fixtures/` when present (kept out of git because
+  they hold patient data).
+- `XLSX_JS=path/to/xlsx.full.min.js node test/e2e.js [file.xlsx]` - drives the web app in
+  Chromium with Google's APIs faked from those snapshots (needs Playwright).
