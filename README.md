@@ -36,9 +36,9 @@ Google sign-in and builds the file locally. Nothing is stored on GitHub.
 - GitHub Pages needs either a **public** repo (free) or a paid GitHub plan for a private repo.
   The code has no patient data in it (sheet ids only, which need your Google login to open).
 - Repo **Settings > Pages > Build and deployment > Source: GitHub Actions**.
-- Push to the default branch; the *Test and publish web app* action publishes `web/`.
-  The address is shown on that action and in Settings > Pages
-  (usually `https://yourphlo.github.io/phlo/`).
+- Publish it: repo **Actions** tab > **Test and publish web app** > **Run workflow** > **Run
+  workflow**. After that it republishes by itself whenever the code changes.
+  The page is at `https://yourphlo.github.io/phlo/` (also shown in Settings > Pages).
 
 **2. Create the Google sign-in key (OAuth client ID)** at https://console.cloud.google.com
 
