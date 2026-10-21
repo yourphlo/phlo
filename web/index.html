@@ -118,12 +118,14 @@
           <label class="field wide"><span>Driver Name <span class="req">(Required)</span></span>
             <input name="name" autocomplete="off" required>
           </label>
-          <label class="field wide"><span>Start Address <span class="req">(Required)</span></span>
-            <input name="startAddress" autocomplete="off" required placeholder="Where the driver starts the day">
-          </label>
-          <label class="field wide">End Address
-            <input name="endAddress" autocomplete="off" placeholder="Leave empty to end at the last stop">
-          </label>
+          <div class="field wide"><label for="f-startAddress">Start Address <span class="req">(Required)</span></label>
+            <div class="addr"><input id="f-startAddress" name="startAddress" autocomplete="off" required placeholder="Where the driver starts the day" aria-describedby="startAddress-pin"></div>
+            <span id="startAddress-pin" class="pin-note"></span>
+          </div>
+          <div class="field wide"><label for="f-endAddress">End Address</label>
+            <div class="addr"><input id="f-endAddress" name="endAddress" autocomplete="off" placeholder="Leave empty to end at the last stop" aria-describedby="endAddress-pin"></div>
+            <span id="endAddress-pin" class="pin-note"></span>
+          </div>
           <fieldset class="field range">
             <legend>Availability</legend>
             <input name="availableFrom" type="time" aria-label="Available from">
@@ -176,6 +178,7 @@
   <script src="stores.js"></script>
   <script src="core.js"></script>
   <script src="drivers.js"></script>
+  <script src="maps.js"></script>
   <script src="history.js"></script>
   <script src="app.js"></script>
 </body>

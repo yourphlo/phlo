@@ -41,17 +41,36 @@ function phloParseTime(v) {
 
 function phloMinutes(t) { var p = t.split(':'); return +p[0] * 60 + +p[1]; }
 
+/** A Google Maps pin for an address: {address, lat, lng, placeId}. Kept only while it still matches
+ * the address text, so editing an address by hand drops its old pin. */
+function phloNormalizePin(pin, address) {
+  if (!pin || typeof pin !== 'object' || !address) return null;
+  var lat = +pin.lat, lng = +pin.lng;
+  if (phloCleanText(pin.address) !== address || !isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { address: address, lat: lat, lng: lng, placeId: phloCleanText(pin.placeId) };
+}
+
+/** Google Maps link for an address, pointing at the exact place when it is pinned. */
+function phloMapsUrl(address, pin) {
+  var u = 'https://www.google.com/maps/search/?api=1&query=';
+  if (pin) return u + pin.lat + ',' + pin.lng + (pin.placeId ? '&query_place_id=' + encodeURIComponent(pin.placeId) : '');
+  return u + encodeURIComponent(address);
+}
+
 /** Tidies a driver from the form or from storage. Keeps bad times as typed so the checks can point at them. */
 function phloNormalizeDriver(d) {
   d = d || {};
   var time = function (v) { var t = phloParseTime(v); return t === null ? phloCleanText(v) : t; };
   var cap = phloCleanText(d.capacity);
   var speed = phloCleanText(d.speed).toUpperCase();
+  var start = phloCleanText(d.startAddress), end = phloCleanText(d.endAddress);
   return {
     id: d.id || ('d' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7)),
     name: phloCleanText(d.name),
-    startAddress: phloCleanText(d.startAddress),
-    endAddress: phloCleanText(d.endAddress),
+    startAddress: start,
+    startPin: phloNormalizePin(d.startPin, start),
+    endAddress: end,
+    endPin: phloNormalizePin(d.endPin, end),
     availableFrom: time(d.availableFrom),
     availableTo: time(d.availableTo),
     mobile: phloCleanText(d.mobile),
@@ -73,17 +92,19 @@ function phloValidateDriver(d, others) {
   }
   if (!d.startAddress) add('startAddress', 'Start address is required.');
 
-  var pair = function (from, to, label) {
+  // needBoth: false lets one side stay empty (availability can be just a start or just an end time).
+  var pair = function (from, to, label, needBoth) {
     var a = d[from], b = d[to], ok = true;
     if (a && phloParseTime(a) === null) { add(from, label + ' start "' + a + '" is not a time.'); ok = false; }
     if (b && phloParseTime(b) === null) { add(to, label + ' end "' + b + '" is not a time.'); ok = false; }
-    if (ok && !!a !== !!b) { add(a ? to : from, label + ' needs both a start and an end time.'); ok = false; }
+    if (ok && needBoth && !!a !== !!b) { add(a ? to : from, label + ' needs both a start and an end time.'); ok = false; }
     if (ok && a && b && phloMinutes(b) <= phloMinutes(a)) { add(to, label + ' must end after it starts.'); ok = false; }
-    return ok && a && b;
+    return ok;
   };
-  var shift = pair('availableFrom', 'availableTo', 'Availability');
-  var lunch = pair('lunchFrom', 'lunchTo', 'Lunch break');
-  if (shift && lunch && (phloMinutes(d.lunchFrom) < phloMinutes(d.availableFrom) || phloMinutes(d.lunchTo) > phloMinutes(d.availableTo))) {
+  var shift = pair('availableFrom', 'availableTo', 'Availability', false);
+  var lunch = pair('lunchFrom', 'lunchTo', 'Lunch break', true) && d.lunchFrom && d.lunchTo;
+  if (shift && lunch && ((d.availableFrom && phloMinutes(d.lunchFrom) < phloMinutes(d.availableFrom)) ||
+      (d.availableTo && phloMinutes(d.lunchTo) > phloMinutes(d.availableTo)))) {
     add('lunchFrom', 'Lunch break should be inside the availability hours.');
   }
 

@@ -843,12 +843,20 @@
       box.addEventListener('change', function () { toggleWorking(d.id, box.checked); });
       var name = el('button', { class: 'dname', type: 'button', text: d.name });
       name.addEventListener('click', function () { openDriverForm(d); });
-      var bits = [];
-      var part = function (label, value) { if (value) bits.push(el('span', {}, [label ? label + ' ' : '', el('b', { text: value })])); };
-      part('', d.startAddress + (d.endAddress && d.endAddress !== d.startAddress ? ' → ' + d.endAddress : ''));
+      var addrLine = el('div', { class: 'dmeta' });
+      var addAddr = function (address, pin) {
+        addrLine.appendChild(el('b', { text: address }));
+        addrLine.appendChild(document.createTextNode(' '));
+        addrLine.appendChild(el('a', { class: 'maplink', href: phloMapsUrl(address, pin), target: '_blank', rel: 'noopener',
+          title: pin ? 'Open the pinned spot in Google Maps' : 'Search Google Maps for this address (not pinned yet)',
+          text: pin ? 'Map' : 'Map (not pinned)' }));
+      };
+      addAddr(d.startAddress, d.startPin);
+      if (d.endAddress && d.endAddress !== d.startAddress) { addrLine.appendChild(document.createTextNode(' → ')); addAddr(d.endAddress, d.endPin); }
       var meta2 = [];
       var part2 = function (label, value) { if (value) meta2.push(el('span', {}, [label + ' ', el('b', { text: value })])); };
-      part2('Hours', d.availableFrom && d.availableTo ? d.availableFrom + '–' + d.availableTo : '');
+      part2('Hours', d.availableFrom && d.availableTo ? d.availableFrom + '–' + d.availableTo
+        : d.availableFrom ? 'from ' + d.availableFrom : d.availableTo ? 'until ' + d.availableTo : '');
       part2('Lunch', d.lunchFrom && d.lunchTo ? d.lunchFrom + '–' + d.lunchTo : '');
       part2('Capacity', d.capacity === '' ? '' : String(d.capacity));
       part2('Speed', d.speed !== 'NORMAL' ? d.speed : '');
@@ -860,7 +868,7 @@
       del.addEventListener('click', function () { deleteDriver(d); });
       ul.appendChild(el('li', { class: on ? '' : 'off' }, [
         box,
-        el('div', { class: 'who' }, [name, el('div', { class: 'dmeta' }, bits), meta2.length ? line2 : null, chips]),
+        el('div', { class: 'who' }, [name, addrLine, meta2.length ? line2 : null, chips]),
         del
       ]));
     });
@@ -890,6 +898,32 @@
     toast('Deleted ' + d.name);
   }
 
+  // Map pins for the two address fields while the form is open: {startAddress: pin|null, endAddress: pin|null}.
+  var formPins = { startAddress: null, endAddress: null };
+  var PIN_KEYS = { startAddress: 'startPin', endAddress: 'endPin' };
+
+  /** The pin for an address field, if it still matches what's typed. */
+  function currentPin(field) {
+    return phloNormalizePin(formPins[field], phloCleanText($('driver-form').elements[field].value));
+  }
+
+  function renderPinNote(field) {
+    var note = $(field + '-pin');
+    var address = phloCleanText($('driver-form').elements[field].value);
+    var pin = currentPin(field);
+    note.textContent = '';
+    note.className = 'pin-note' + (pin ? ' ok' : '');
+    if (!address) return;
+    if (pin) {
+      note.appendChild(document.createTextNode('Pinned on Google Maps · '));
+    } else if (phloMaps.enabled) {
+      note.appendChild(document.createTextNode('Not pinned yet: pick the address from the Google suggestions · '));
+    } else {
+      return;
+    }
+    note.appendChild(el('a', { href: phloMapsUrl(address, pin), target: '_blank', rel: 'noopener', text: 'Open in Google Maps' }));
+  }
+
   var FORM_FIELDS = ['name', 'startAddress', 'endAddress', 'availableFrom', 'availableTo', 'mobile', 'capacity', 'types', 'lunchFrom', 'lunchTo'];
 
   function openDriverForm(d) {
@@ -901,6 +935,7 @@
       f.elements[k].value = Array.isArray(v) ? v.join(', ') : (v == null ? '' : String(v));
       f.elements[k].removeAttribute('aria-invalid');
     });
+    Object.keys(PIN_KEYS).forEach(function (k) { formPins[k] = d ? d[PIN_KEYS[k]] : null; renderPinNote(k); });
     var speed = d ? d.speed : 'NORMAL';
     Array.prototype.forEach.call(f.elements.speed, function (r) { r.checked = r.value === speed; });
     $('driver-form-title').textContent = d ? 'Edit ' + d.name : 'Add driver';
@@ -928,6 +963,7 @@
     var f = $('driver-form');
     var raw = { id: drv.editing ? drv.editing.id : null };
     FORM_FIELDS.forEach(function (k) { raw[k] = f.elements[k].value; });
+    Object.keys(PIN_KEYS).forEach(function (k) { raw[PIN_KEYS[k]] = formPins[k]; });
     var checked = f.querySelector('input[name="speed"]:checked');
     raw.speed = checked ? checked.value : 'NORMAL';
     var d = phloNormalizeDriver(raw);
@@ -1029,6 +1065,12 @@
     $('cancel-driver').addEventListener('click', closeDriverForm);
     $('driver-form').addEventListener('submit', saveDriverForm);
     $('driver-form').elements.types.addEventListener('input', renderTypesPreview);
+    phloMaps.onError = toast;
+    Object.keys(PIN_KEYS).forEach(function (k) {
+      var input = $('driver-form').elements[k];
+      input.addEventListener('input', function () { renderPinNote(k); });
+      phloMaps.attach(input, function (pin) { formPins[k] = pin; renderPinNote(k); });
+    });
     $('download-drivers').addEventListener('click', downloadDrivers);
     loadLocalDrivers();
     renderDrivers();

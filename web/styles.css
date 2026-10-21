@@ -157,6 +157,18 @@ tr.flash td { animation: flash 1.6s ease-out; }
 .chip { font-size: 12px; font-weight: 500; background: var(--info-bg); color: var(--info); border-radius: 99px; padding: 2px 9px; }
 
 .drivers { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.addr { position: relative; }
+.suggest {
+  position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20; list-style: none; margin: 0; padding: 4px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, .12);
+}
+.suggest li { padding: 7px 10px; border-radius: 6px; cursor: pointer; font-size: 14px; color: var(--ink); overflow-wrap: anywhere; }
+.suggest li span { color: var(--muted); }
+.suggest li:hover, .suggest li[aria-selected="true"] { background: var(--bg); }
+.pin-note { font-size: 13px; color: var(--muted); }
+.pin-note:empty { display: none; }
+.pin-note.ok { color: var(--ok); }
+.pin-note a, .drivers .maplink { color: var(--info); }
 .drivers li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 12px; align-items: start; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
 .drivers li.off { opacity: .6; }
 .drivers li.empty { display: block; color: var(--muted); border-style: dashed; text-align: center; padding: 22px; }

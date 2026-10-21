@@ -90,6 +90,16 @@ const bad = ctx.phloNormalizeDriver({ id: 'b', name: 'ana ruiz', capacity: '0', 
 eq(ctx.phloValidateDriver(bad, [drv]).map(e => e.field), ['name', 'startAddress', 'availableTo', 'lunchTo', 'capacity', 'mobile'], 'driver errors');
 const lunchOut = ctx.phloNormalizeDriver({ name: 'B', startAddress: 'x', availableFrom: '09:00', availableTo: '13:00', lunchFrom: '13:00', lunchTo: '13:30' });
 eq(ctx.phloValidateDriver(lunchOut, []).map(e => e.field), ['lunchFrom'], 'lunch outside hours');
+const oneSided = ['availableFrom', 'availableTo'].map(k => ctx.phloValidateDriver(ctx.phloNormalizeDriver({ name: 'C', startAddress: 'x', [k]: '09:00' }), []));
+eq(oneSided, [[], []], 'availability can be just a start or just an end');
+eq(ctx.phloValidateDriver(ctx.phloNormalizeDriver({ name: 'C', startAddress: 'x', availableFrom: '13:00', lunchFrom: '12:00', lunchTo: '12:30' }), []).map(e => e.field), ['lunchFrom'], 'lunch before a start-only shift');
+eq(ctx.phloValidateDriver(ctx.phloNormalizeDriver({ name: 'C', startAddress: 'x', lunchFrom: '12:00' }), []).map(e => e.field), ['lunchTo'], 'lunch still needs both times');
+const pin = { address: '1 Main St, Los Angeles, CA 90012, USA', lat: 34.05, lng: -118.24, placeId: 'abc' };
+const pinned = ctx.phloNormalizeDriver({ name: 'P', startAddress: pin.address, startPin: pin, endAddress: '2 Elm St', endPin: pin });
+eq([pinned.startPin, pinned.endPin], [pin, null], 'pin kept only while it matches the address');
+eq(ctx.phloNormalizePin({ address: 'x', lat: 'bad', lng: 0 }, 'x'), null, 'pin needs coordinates');
+eq([ctx.phloMapsUrl('1 Main St', null), ctx.phloMapsUrl(pin.address, pin)],
+  ['https://www.google.com/maps/search/?api=1&query=1%20Main%20St', 'https://www.google.com/maps/search/?api=1&query=34.05,-118.24&query_place_id=abc'], 'maps links');
 eq(ctx.phloDriverRows([drv])[1], ['Ana Ruiz', '1 Main St', '', '08:00', '17:00', '', 40, 'FRIDGE', 'FAST (190%)', '12:00', '12:30'], 'driver export row');
 const roster = ctx.phloDriversData({ drivers: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], roster: { '2026-10-19': ['a'], '2026-10-21': ['b', 'gone'], bad: ['a'] } });
 eq([ctx.phloRosterFor(roster, '2026-10-18'), ctx.phloRosterFor(roster, '2026-10-20'), ctx.phloRosterFor(roster, '2026-10-21')], [['a', 'b'], ['a'], ['b']], 'roster fallback');
