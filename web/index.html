@@ -157,7 +157,22 @@
       </section>
 
       <section id="dp-map-card" class="card" hidden>
-        <div class="cov-map-wrap"><div id="dp-map" class="cov-map"></div></div>
+        <div class="cov-tools dp-tools" role="toolbar" aria-label="Map tools">
+          <button type="button" class="tool" data-dptool="move" aria-pressed="true">&#10021; Move</button>
+          <button type="button" class="tool" data-dptool="select" aria-pressed="false">&#9711; Select stops</button>
+          <div id="dp-sel" class="dp-sel" hidden>
+            <b id="dp-sel-count"></b>
+            <label>to <select id="dp-sel-driver" aria-label="Driver to give the selected stops to"></select></label>
+            <button type="button" id="dp-sel-apply" class="btn primary">Move stops</button>
+            <button type="button" id="dp-sel-clear" class="btn ghost">Clear</button>
+          </div>
+        </div>
+        <p id="dp-sel-help" class="muted small" hidden>Draw a loop around stops to select them, or tap a stop to add or remove it.
+          Then pick a driver and click <b>Move stops</b>.</p>
+        <div class="cov-map-wrap">
+          <div id="dp-map" class="cov-map"></div>
+          <div id="dp-draw" class="cov-draw" hidden></div>
+        </div>
       </section>
 
       <section id="dp-routes-card" class="card" hidden>

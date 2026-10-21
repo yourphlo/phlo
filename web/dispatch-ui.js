@@ -14,16 +14,15 @@
 
   var geoCache = {};       // address -> {lat, lng, partial, formatted} | {none: true}, for this page visit only
   var plan = null;         // {iso, stops, drivers, routes, warnings}
-  var dmap = { map: null, loading: null, markers: [], lines: [], areas: [], info: null };
+  var dmap = { map: null, loading: null, markers: [], lines: [], areas: [], info: null, ov: null, tool: 'move', sel: {}, lasso: null };
   var live = { timer: null, busy: false };
 
+  // Check before sending lists address problems only; who takes which stop is checked by hand.
   var FLAG_TEXT = {
     notFound: 'Address not found on Google Maps',
-    partial: 'Google only found part of this address',
-    outside: 'Not in any working driver\'s area',
-    overlap: 'In more than one driver\'s area',
-    type: 'No working driver has its type'
+    partial: 'Google only found part of this address'
   };
+  function addressFlags(flags) { return flags.filter(function (f) { return FLAG_TEXT[f]; }); }
 
   /* ---------------- setup + summary ---------------- */
 
@@ -187,8 +186,8 @@
         var src = d.src;
         d.startPt = src.startPin ? { lat: src.startPin.lat, lng: src.startPin.lng } : null;
         d.endPt = src.endPin ? { lat: src.endPin.lat, lng: src.endPin.lng } : null;
-        if (!d.startPt && src.startAddress) lookups.push(function () { return geocode(g, src.startAddress).then(function (r) { if (!r.none) d.startPt = { lat: r.lat, lng: r.lng }; else plan.problems.push(d.name + '\'s start address was not found on Google Maps.'); }); });
-        if (!d.endPt && src.endAddress) lookups.push(function () { return geocode(g, src.endAddress).then(function (r) { if (!r.none) d.endPt = { lat: r.lat, lng: r.lng }; }); });
+        if (!d.startPt && src.startAddress) lookups.push(function () { return geocode(g, src.startAddress).then(function (r) { if (!r.none) d.startPt = { lat: r.lat, lng: r.lng }; else plan.problems.push(d.name + '\'s start address was not found on Google Maps, so the route starts at the first stop. Fix it on the Drivers tab.'); }); });
+        if (!d.endPt && src.endAddress) lookups.push(function () { return geocode(g, src.endAddress).then(function (r) { if (!r.none) d.endPt = { lat: r.lat, lng: r.lng }; else plan.problems.push(d.name + '\'s end address was not found on Google Maps, so the route ends at the last stop. Fix it on the Drivers tab.'); }); });
       });
       stops.forEach(function (s) {
         lookups.push(function () {
@@ -226,7 +225,7 @@
       var r = res[s.id];
       s.driverId = r.driverId;
       s.manual = r.flags.indexOf('manual') >= 0;
-      s.flags = r.flags.filter(function (f) { return f !== 'manual'; });
+      s.flags = addressFlags(r.flags);
       if (s.partial && s.flags.indexOf('notFound') < 0) s.flags.push('partial');
     });
   }
@@ -242,18 +241,28 @@
   }
 
   /** Moves a stop to another driver (or back to "nobody") and re-plans the routes it left and joined. */
-  function moveStop(stop, driverId) {
-    var old = stop.driverId;
-    if (old === driverId) return;
-    stop.driverId = driverId || null;
-    stop.manual = !!driverId;
-    stop.flags = stop.flags.filter(function (f) { return f === 'notFound' || f === 'partial'; });
-    var touched = plan.drivers.filter(function (d) { return d.id === old || d.id === driverId; });
+  function moveStop(stop, driverId) { moveStops([stop], driverId); }
+
+  /** Moves several stops to one driver ('' = off the routes) and re-plans every route that changed. */
+  function moveStops(stops, driverId) {
+    driverId = driverId || null;
+    var changed = {}, moved = 0;
+    stops.forEach(function (stop) {
+      if (stop.lat == null || stop.driverId === driverId) return;
+      if (stop.driverId) changed[stop.driverId] = true;
+      stop.driverId = driverId;
+      stop.manual = !!driverId;
+      stop.flags = addressFlags(stop.flags);
+      moved++;
+    });
+    if (!moved) { toast(driverId ? 'Those stops are already with ' + driverName(driverId) + '.' : 'Those stops are already off the routes.'); return Promise.resolve(); }
+    if (driverId) changed[driverId] = true;
+    var touched = plan.drivers.filter(function (d) { return changed[d.id]; });
     note('Re-planning…');
-    Promise.all(touched.map(routeDriver)).then(function () {
+    return Promise.all(touched.map(routeDriver)).then(function () {
       afterPlan();
-      var d = plan.drivers.filter(function (x) { return x.id === driverId; })[0];
-      toast(d ? 'Moved to ' + d.name : 'Taken off the routes');
+      var what = moved === 1 ? '' : moved + ' stops ';
+      toast(driverId ? 'Moved ' + what + 'to ' + driverName(driverId) : 'Took ' + what + 'off the routes');
     });
   }
 
@@ -267,7 +276,7 @@
       var res = phloAssignStops([{ id: stop.id, lat: r.lat, lng: r.lng, tags: stop.tags, driverId: stop.manual ? stop.driverId : null }],
         plan.drivers.map(function (d) { return { id: d.id, areas: d.src.areas, types: d.src.types, capacity: d.src.capacity, start: d.startPt }; }))[stop.id];
       stop.driverId = res.driverId;
-      stop.flags = res.flags.filter(function (f) { return f !== 'manual'; });
+      stop.flags = addressFlags(res.flags);
       if (r.partial) stop.flags.push('partial');
       var d = plan.drivers.filter(function (x) { return x.id === stop.driverId; })[0];
       return (d ? routeDriver(d) : Promise.resolve()).then(afterPlan);
@@ -301,36 +310,31 @@
     plan.problems.forEach(function (p) { items.push({ level: 'error', text: p }); });
     plan.stops.forEach(function (s) {
       s.flags.forEach(function (f) {
-        var extra = f === 'overlap' || f === 'outside' || f === 'type' ? ' → given to ' + driverName(s.driverId) : f === 'partial' ? ' (found: ' + (s.formatted || '?') + ')' : '';
+        var extra = f === 'partial' ? ' (found: ' + (s.formatted || '?') + ')' : '';
         items.push({ level: f === 'notFound' ? 'error' : 'warn', stop: s, flag: f, text: FLAG_TEXT[f] + extra });
       });
-    });
-    plan.drivers.forEach(function (d) {
-      var r = plan.routes[d.id], n = r.stopIds.length;
-      if (typeof d.src.capacity === 'number' && n > d.src.capacity) items.push({ level: 'warn', text: d.name + ' has ' + n + ' stops but a capacity of ' + d.src.capacity + '.' });
-      if (r.schedule && r.schedule.late.length) items.push({ level: 'warn', text: d.name + ' reaches ' + r.schedule.late.length + ' stop' + (r.schedule.late.length === 1 ? '' : 's') + ' after ' + phloClock(d.src.availableTo) + ' (finishes ' + phloClock(r.schedule.finish) + ').' });
-      if (!d.startPt) items.push({ level: 'error', text: d.name + ' has no start point, so the route starts at the first stop.' });
     });
     items.forEach(function (it) {
       var li = el('li', { class: it.level + ' wrap' }, [
         el('span', { class: 'where', text: it.stop ? it.stop.name : '' }),
         el('span', { text: it.text })
       ]);
-      if (it.stop && it.flag === 'notFound') {
+      if (it.stop) {
         var input = el('input', { value: it.stop.address, 'aria-label': 'Address for ' + it.stop.name });
         var btn = el('button', { class: 'btn', type: 'button', text: 'Find' });
         btn.addEventListener('click', function (e) { e.stopPropagation(); retryAddress(it.stop, input.value.trim()); });
         input.addEventListener('click', function (e) { e.stopPropagation(); });
         input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); retryAddress(it.stop, input.value.trim()); } });
         li.appendChild(el('div', { class: 'dp-fix' }, [input, btn]));
-      } else if (it.stop) {
-        li.tabIndex = 0;
-        li.addEventListener('click', function () { focusStop(it.stop); });
-        li.addEventListener('keydown', function (e) { if (e.key === 'Enter') focusStop(it.stop); });
+        if (it.stop.lat != null) {
+          li.tabIndex = 0;
+          li.addEventListener('click', function () { focusStop(it.stop); });
+          li.addEventListener('keydown', function (e) { if (e.key === 'Enter' && e.target === li) focusStop(it.stop); });
+        }
       }
       list.appendChild(li);
     });
-    if (!items.length) list.appendChild(el('li', { class: 'empty', text: 'Every stop has a clear driver.' }));
+    if (!items.length) list.appendChild(el('li', { class: 'empty', text: 'Every address was found on Google Maps.' }));
     $('dp-flags-count').textContent = items.length ? String(items.length) : '';
     $('dp-flags-card').hidden = false;
   }
@@ -400,6 +404,10 @@
     dmap.loading = phloMaps.library('maps').then(function (lib) {
       dmap.map = new lib.Map($('dp-map'), { center: { lat: 34.05, lng: -118.25 }, zoom: 10, clickableIcons: false, mapTypeControl: false, streetViewControl: false });
       dmap.info = new lib.InfoWindow();
+      // An empty overlay, only to turn map points into screen pixels for the selection loop.
+      dmap.ov = new lib.OverlayView();
+      dmap.ov.onAdd = dmap.ov.draw = dmap.ov.onRemove = function () {};
+      dmap.ov.setMap(dmap.map);
       return dmap.map;
     });
     return dmap.loading;
@@ -428,21 +436,153 @@
       });
       plan.stops.forEach(function (s) {
         if (s.lat == null) return;
-        var color = s.driverId ? colors[s.driverId] : '#777777';
         var m = new google.maps.Marker({
           map: map, position: { lat: s.lat, lng: s.lng }, title: s.name, zIndex: 2,
-          label: s.driverId ? { text: String(s.seq || ''), color: '#ffffff', fontSize: '11px', fontWeight: '600' } : null,
-          icon: { path: google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: color, fillOpacity: 1,
-            strokeColor: s.flags.length ? '#b42318' : '#ffffff', strokeWeight: s.flags.length ? 3 : 1.5 }
+          label: s.driverId ? { text: String(s.seq || ''), color: '#ffffff', fontSize: '11px', fontWeight: '600' } : null
         });
-        m.addListener('click', function () { openInfo(s, m); });
+        m.addListener('click', function () { if (dmap.tool === 'select') toggleSel(s); else openInfo(s, m); });
         s.marker = m;
+        styleMarker(s, colors);
         dmap.markers.push(m);
         bounds.extend({ lat: s.lat, lng: s.lng }); any = true;
       });
       if (any && !dmap.fittedFor) { map.fitBounds(bounds, 40); }
       dmap.fittedFor = plan.iso;
+      // Keep the selection to stops that are still on the map.
+      Object.keys(dmap.sel).forEach(function (id) { if (!plan.stops.some(function (s) { return s.id === id && s.lat != null; })) delete dmap.sel[id]; });
+      renderSel();
     }).catch(function (e) { toast('Could not load the map: ' + e.message); });
+  }
+
+  /* ---------------- select stops on the map ---------------- */
+
+  /** Selected stops get a black ring and a bigger dot; flagged ones keep a red ring. */
+  function styleMarker(s, colors) {
+    if (!s.marker) return;
+    colors = colors || A.colors();
+    var on = !!dmap.sel[s.id];
+    s.marker.setIcon({ path: google.maps.SymbolPath.CIRCLE, scale: on ? 13 : 10, fillColor: s.driverId ? colors[s.driverId] : '#777777', fillOpacity: 1,
+      strokeColor: on ? '#111111' : s.flags.length ? '#b42318' : '#ffffff', strokeWeight: on ? 4 : s.flags.length ? 3 : 1.5 });
+    s.marker.setZIndex(on ? 3 : 2);
+  }
+
+  function selected() { return plan ? plan.stops.filter(function (s) { return dmap.sel[s.id]; }) : []; }
+
+  function renderSel() {
+    var list = selected();
+    document.querySelectorAll('[data-dptool]').forEach(function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-dptool') === dmap.tool ? 'true' : 'false'); });
+    $('dp-draw').hidden = dmap.tool !== 'select';
+    $('dp-sel-help').hidden = dmap.tool !== 'select';
+    $('dp-sel').hidden = !list.length;
+    if (!list.length) { $('dp-sel-driver').textContent = ''; return; }
+    var from = {};
+    list.forEach(function (s) { from[s.driverId ? driverName(s.driverId).split(' ')[0] : 'nobody'] = true; });
+    $('dp-sel-count').textContent = list.length + ' stop' + (list.length === 1 ? '' : 's') + ' selected (' + Object.keys(from).join(', ') + ')';
+    var sel = $('dp-sel-driver'), keep = sel.options.length ? sel.value : null;
+    sel.textContent = '';
+    plan.drivers.forEach(function (d) { sel.appendChild(el('option', { value: d.id, text: d.name })); });
+    sel.appendChild(el('option', { value: '', text: 'Off the routes' }));
+    // Keep what was picked; else start on the first driver who doesn't already have these stops.
+    var owners = {}; list.forEach(function (s) { owners[s.driverId] = true; });
+    var other = plan.drivers.filter(function (d) { return !owners[d.id]; })[0] || plan.drivers[0];
+    sel.value = keep !== null && (keep === '' || plan.drivers.some(function (d) { return d.id === keep; })) ? keep : other ? other.id : '';
+  }
+
+  function setDpTool(tool) {
+    dmap.tool = tool;
+    if (tool === 'select' && dmap.info) dmap.info.close();
+    renderSel();
+  }
+
+  function toggleSel(s) {
+    if (s.lat == null) return;
+    if (dmap.sel[s.id]) delete dmap.sel[s.id]; else dmap.sel[s.id] = true;
+    styleMarker(s);
+    renderSel();
+  }
+
+  function clearSel() {
+    var was = selected();
+    dmap.sel = {};
+    was.forEach(function (s) { styleMarker(s); });
+    renderSel();
+  }
+
+  function applySel() {
+    var list = selected(), to = $('dp-sel-driver').value;
+    if (!list.length) return;
+    $('dp-sel-apply').disabled = true;
+    dmap.sel = {};
+    moveStops(list, to).then(function () { $('dp-sel-apply').disabled = false; renderSel(); });
+  }
+
+  function padPt(e) { var r = $('dp-draw').getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+
+  /** Screen pixel of a stop on the map, or null when the map isn't ready. */
+  function stopPx(s) {
+    var proj = dmap.ov && dmap.ov.getProjection();
+    if (!proj) return null;
+    var p = proj.fromLatLngToContainerPixel(new google.maps.LatLng(s.lat, s.lng));
+    return p ? [p.x, p.y] : null;
+  }
+
+  function lassoStart(e) {
+    if (!plan || !dmap.map || e.button > 0 || !dmap.ov.getProjection()) return;
+    e.preventDefault();
+    $('dp-draw').setPointerCapture(e.pointerId);
+    var p = padPt(e);
+    var line = new google.maps.Polyline({ map: dmap.map, clickable: false, strokeColor: '#111111', strokeOpacity: 0.9, strokeWeight: 2, zIndex: 5 });
+    line.getPath().push(dmap.ov.getProjection().fromContainerPixelToLatLng(new google.maps.Point(p[0], p[1])));
+    dmap.lasso = { pointer: e.pointerId, pts: [p], line: line };
+  }
+
+  function lassoMove(e) {
+    var l = dmap.lasso;
+    if (!l || e.pointerId !== l.pointer) return;
+    var p = padPt(e), last = l.pts[l.pts.length - 1];
+    if (Math.abs(p[0] - last[0]) + Math.abs(p[1] - last[1]) < 3) return;
+    l.pts.push(p);
+    l.line.getPath().push(dmap.ov.getProjection().fromContainerPixelToLatLng(new google.maps.Point(p[0], p[1])));
+  }
+
+  function lassoEnd(e) {
+    var l = dmap.lasso;
+    if (!l || e.pointerId !== l.pointer) return;
+    dmap.lasso = null;
+    l.line.setMap(null);
+    if (e.type === 'pointercancel') return;
+    var xs = l.pts.map(function (p) { return p[0]; }), ys = l.pts.map(function (p) { return p[1]; });
+    var small = Math.max.apply(null, xs) - Math.min.apply(null, xs) < 10 && Math.max.apply(null, ys) - Math.min.apply(null, ys) < 10;
+    var onMap = plan.stops.filter(function (s) { return s.lat != null; });
+    if (small) {
+      // A tap: toggle the nearest stop within reach.
+      var best = null, bestD = 18 * 18;
+      onMap.forEach(function (s) {
+        var q = stopPx(s); if (!q) return;
+        var d = (q[0] - l.pts[0][0]) * (q[0] - l.pts[0][0]) + (q[1] - l.pts[0][1]) * (q[1] - l.pts[0][1]);
+        if (d < bestD) { bestD = d; best = s; }
+      });
+      if (best) toggleSel(best);
+      return;
+    }
+    // A loop: add every stop inside it (screen pixels as [y, x] so phloInArea can test them).
+    var ring = l.pts.map(function (p) { return [p[1], p[0]]; });
+    var added = 0;
+    onMap.forEach(function (s) {
+      var q = stopPx(s);
+      if (q && phloInArea({ lat: q[1], lng: q[0] }, ring) && !dmap.sel[s.id]) { dmap.sel[s.id] = true; styleMarker(s); added++; }
+    });
+    if (!added) toast('No stops inside that loop.');
+    renderSel();
+  }
+
+  function lassoWheel(e) {
+    if (!dmap.map) return;
+    e.preventDefault();
+    var now = Date.now();
+    if (now - (dmap.wheelAt || 0) < 200) return;
+    dmap.wheelAt = now;
+    dmap.map.setZoom(dmap.map.getZoom() + (e.deltaY < 0 ? 1 : -1));
   }
 
   function openInfo(s, marker) {
@@ -504,7 +644,7 @@
     var flagged = plan.stops.filter(function (s) { return s.flags.length; }).length;
     var off = plan.stops.filter(function (s) { return !s.driverId; }).length;
     var msg = 'Send ' + plan.drivers.filter(function (d) { return plan.routes[d.id].stopIds.length; }).length + ' routes for ' + A.niceDate(A.fromIso(plan.iso)) + ' to the drivers?';
-    if (flagged) msg += '\n\n' + flagged + ' stop' + (flagged === 1 ? ' is' : 's are') + ' still flagged in "Check before sending".';
+    if (flagged) msg += '\n\n' + flagged + ' stop' + (flagged === 1 ? ' still has an address problem' : 's still have address problems') + ' in "Check before sending".';
     if (off) msg += '\n' + off + ' stop' + (off === 1 ? ' is' : 's are') + ' not on any route and will not be sent.';
     msg += '\n\nSending again later replaces these routes; what drivers already recorded is kept.';
     if (!confirm(msg)) return;
@@ -636,6 +776,16 @@
     $('dp-print').addEventListener('click', printRoutes);
     $('dp-send').addEventListener('click', sendRoutes);
     $('dp-live-refresh').addEventListener('click', refreshLive);
+    document.querySelectorAll('[data-dptool]').forEach(function (b) { b.addEventListener('click', function () { setDpTool(b.getAttribute('data-dptool')); }); });
+    $('dp-sel-apply').addEventListener('click', applySel);
+    $('dp-sel-clear').addEventListener('click', clearSel);
+    var pad = $('dp-draw');
+    pad.addEventListener('pointerdown', lassoStart);
+    pad.addEventListener('pointermove', lassoMove);
+    pad.addEventListener('pointerup', lassoEnd);
+    pad.addEventListener('pointercancel', lassoEnd);
+    pad.addEventListener('wheel', lassoWheel, { passive: false });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && A.view() === 'dispatch' && selected().length && !document.querySelector('dialog[open]')) clearSel(); });
     $('dp-live-date').addEventListener('change', refreshLive);
     ['dp-start', 'dp-service'].forEach(function (id) {
       $(id).addEventListener('change', function () {
@@ -644,7 +794,7 @@
       });
     });
     document.addEventListener('phlo:rows', function () {
-      plan = null; dmap.fittedFor = null;
+      plan = null; dmap.fittedFor = null; dmap.sel = {};
       ['dp-flags-card', 'dp-routes-card'].forEach(function (id) { $(id).hidden = true; });
       $('dp-print').disabled = $('dp-send').disabled = true;
       $('dp-live-date').value = A.deliveryIso();
