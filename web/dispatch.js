@@ -1,7 +1,7 @@
 /* PHLO dispatch: who takes each stop, in what order, and when they get there.
  * Pure functions (no page or Google code) so test/run.js can check them in Node. */
 
-var DISPATCH_DEFAULTS = { dayStart: '09:00', serviceMin: 4 };
+var DISPATCH_DEFAULTS = { dayStart: '09:00', serviceMin: 10 };
 // Travel time multiplier per driver speed (an assumption: a slow driver takes 15% longer).
 var SPEED_FACTORS = { SLOW: 1.15, NORMAL: 1, FAST: 0.9 };
 var GOOGLE_MAX_VIA = 25; // Google optimizes at most 25 stops between a start and an end

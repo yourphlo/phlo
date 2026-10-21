@@ -94,7 +94,8 @@ on the Drivers tab for the delivery date) and sends each driver their route.
    If that driver isn't working that day, the stop is listed under **Not on a route**. It then
    orders each route by real driving time from the driver's start address (and back to their end
    address, if they have one). Arrival times use the driver's hours, lunch break and speed, plus
-   **Minutes per stop**. **Start time** is used for drivers without an availability start.
+   **Minutes per stop** (10 unless you change it). **Start time** (9:00 AM unless you change it) is used for
+   drivers without an availability start.
 2. **Check before sending** lists address problems only: stop addresses Google can't find (fix the
    address and click **Find**), stop addresses Google only found part of, and driver start or end
    addresses it can't find (fix those on the Drivers tab). When Google only found part of an

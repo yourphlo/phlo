@@ -153,7 +153,7 @@
     var finish = function (list, legs) {
       r.stopIds = list.map(function (s) { return s.id; });
       r.legs = legs;
-      r.schedule = phloSchedule(legs, list.length, d.src, { dayStart: $('dp-start').value || '09:00', serviceMin: +$('dp-service').value || 0 });
+      r.schedule = phloSchedule(legs, list.length, d.src, { dayStart: $('dp-start').value || '09:00', serviceMin: $('dp-service').value === '' ? DISPATCH_DEFAULTS.serviceMin : +$('dp-service').value });
       list.forEach(function (s, i) { s.seq = i + 1; s.eta = r.schedule.etas[i]; s.late = r.schedule.late.indexOf(i) >= 0; });
     };
     finish(order, estLegs(order));
