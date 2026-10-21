@@ -26,6 +26,22 @@ Two ways to run it (same logic, same results):
 6. Optional: drop your hand-edited upload file into **Check a finished file** to see any RX
    number missing from it, any that isn't in the store sheets, and typos.
 
+### Drivers
+
+The **Drivers** tab keeps a profile for each driver: name and start address (required), end
+address, availability hours, mobile number, capacity, types (case sensitive, e.g. `FRIDGE`),
+driving speed (SLOW 10% / NORMAL 100% / FAST 190%) and lunch break.
+
+1. Click **Add driver**, fill in the form, **Save driver**. Click a name later to edit it, × to delete.
+2. Pick the **Working on** date (defaults to tomorrow) and tick who is driving that day. A new
+   date starts with the same drivers as the last day you set.
+3. **Download drivers .xlsx** saves the working drivers (`10.21.26_DRIVERS.xlsx`), one row per
+   driver with the fields above.
+
+When you're signed in, profiles are saved to your own Google account (a hidden app folder in
+your Google Drive), so they show up on any computer once you sign in with the same account.
+Signed out, they are kept in that browser only and uploaded the next time you sign in.
+
 Patient data never leaves your browser and Google: the page reads the sheets with your own
 Google sign-in and builds the file locally. Nothing is stored on GitHub.
 
@@ -47,7 +63,8 @@ Google sign-in and builds the file locally. Nothing is stored on GitHub.
 3. **Google Auth Platform** (OAuth consent screen): app name "PHLO Master", your email,
    audience **External**. Under **Audience > Test users**, add every Google account that will
    use the page (e.g. yourphlo@gmail.com). Leave the app in *Testing*.
-4. **Data access > Add scopes**: `.../auth/spreadsheets.readonly` and `.../auth/drive.readonly`.
+4. **Data access > Add scopes**: `.../auth/spreadsheets.readonly`, `.../auth/drive.readonly` and
+   `.../auth/drive.appdata` (the last one saves the driver profiles in your Drive's hidden app folder).
 5. **Clients > Create client > Web application**. Under **Authorized JavaScript origins** add
    `https://yourphlo.github.io` (and `http://localhost:8000` for testing on a computer).
    Create, then copy the **Client ID** (ends in `.apps.googleusercontent.com`).
