@@ -11,5 +11,5 @@ window.PHLO_CONFIG = {
   mapsApiKey: 'AIzaSyAgKKj2E5yMTIntVmX6ZZttIBq770rx47M',
   // Web app URL of the PHLO dispatch script (apps-script-dispatch/README.md), ending in /exec.
   // Needed to send routes to drivers and for driver sign-in. Leave empty to plan and print routes only.
-  dispatchUrl: '',
+  dispatchUrl: 'https://script.google.com/macros/s/AKfycbzox9QR4YP5JqpPHjjw1kDpNKCkg0aHIn3nbTjF6qsFExiEv8-uoD0Rq3j2HykGmoO0/exec',
 };
