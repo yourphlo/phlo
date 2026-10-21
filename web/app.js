@@ -604,6 +604,7 @@
       part2('Capacity', d.capacity === '' ? '' : String(d.capacity));
       part2('Speed', d.speed !== 'NORMAL' ? d.speed : '');
       part2('Mobile', d.mobile);
+      part2('Areas', d.areas.length ? String(d.areas.length) : '');
       var line2 = el('div', { class: 'dmeta' });
       meta2.forEach(function (n, i) { if (i) line2.appendChild(document.createTextNode(' · ')); line2.appendChild(n); });
       var chips = el('div', { class: 'chips' }, d.types.map(function (t) { return el('span', { class: 'chip', text: t }); }));
@@ -620,6 +621,7 @@
     $('drivers-tab-count').textContent = data.drivers.length ? String(data.drivers.length) : '';
     $('download-drivers').disabled = !working.length;
     renderSyncNote();
+    renderCoverage();
   }
 
   function toggleWorking(id, on) {
@@ -709,6 +711,10 @@
     Object.keys(PIN_KEYS).forEach(function (k) { raw[PIN_KEYS[k]] = formPins[k]; });
     var checked = f.querySelector('input[name="speed"]:checked');
     raw.speed = checked ? checked.value : 'NORMAL';
+    // Areas are drawn on the map, not in the form: keep the driver's current ones.
+    var current = drv.editing && drv.data.drivers.filter(function (x) { return x.id === drv.editing.id; })[0];
+    raw.areas = current ? current.areas : [];
+    raw.color = current ? current.color : '';
     var d = phloNormalizeDriver(raw);
     var errs = phloValidateDriver(d, drv.data.drivers);
     FORM_FIELDS.forEach(function (k) { f.elements[k].removeAttribute('aria-invalid'); });
@@ -752,6 +758,205 @@
     XLSX.writeFile(wb, phloFmt(fromIso(iso), 'MM.dd.yy') + '_DRIVERS.xlsx');
   }
 
+  /* ---------------- coverage map ---------------- */
+
+  // Each driver's areas are drawn freehand on a Google map and saved in their profile (driver.areas),
+  // so they sync to the Google account with the rest of the drivers file.
+  var cov = { map: null, ov: null, loading: null, polys: [], tool: 'move', driverId: null, undo: [], drawing: null, fitted: false, wheelAt: 0 };
+
+  function covDriver() { return drv.data.drivers.filter(function (d) { return d.id === cov.driverId; })[0] || null; }
+
+  function renderCoverage() {
+    var drivers = drv.data.drivers.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
+    if (!covDriver()) cov.driverId = drivers.length ? drivers[0].id : null;
+    var colors = phloDriverColors(drv.data.drivers);
+    var box = $('cov-drivers');
+    box.textContent = '';
+    if (!drivers.length) box.appendChild(el('span', { class: 'empty', text: 'Add a driver above to start drawing their area.' }));
+    drivers.forEach(function (d) {
+      var chip = el('button', { type: 'button', class: 'cov-chip', role: 'radio', 'aria-checked': d.id === cov.driverId ? 'true' : 'false' }, [
+        el('span', { class: 'dot' }), d.name, el('span', { class: 'n', text: d.areas.length ? String(d.areas.length) : '' })
+      ]);
+      chip.firstChild.style.background = colors[d.id];
+      chip.addEventListener('click', function () { cov.driverId = d.id; renderCoverage(); });
+      box.appendChild(chip);
+    });
+    var total = 0, withAreas = 0;
+    drv.data.drivers.forEach(function (d) { total += d.areas.length; if (d.areas.length) withAreas++; });
+    $('coverage-count').textContent = total ? total + (total === 1 ? ' area' : ' areas') + ' · ' + withAreas + (withAreas === 1 ? ' driver' : ' drivers') : '';
+    $('cov-download').disabled = !total;
+    $('cov-undo').disabled = !cov.undo.length;
+    var cur = covDriver();
+    $('cov-clear').disabled = !cur || !cur.areas.length;
+    if (!cur && cov.tool === 'pencil') cov.tool = 'move';
+    document.querySelectorAll('.cov-tools [data-tool]').forEach(function (b) {
+      b.setAttribute('aria-pressed', b.getAttribute('data-tool') === cov.tool ? 'true' : 'false');
+      if (b.getAttribute('data-tool') === 'pencil') b.disabled = !cur;
+    });
+    $('cov-draw').hidden = !(cov.map && cov.tool === 'pencil');
+    if (!cov.map) return;
+    cov.map.setOptions({ draggableCursor: cov.tool === 'erase' ? 'pointer' : null });
+    drawAreas(colors);
+    if (!cov.fitted && total) { cov.fitted = true; fitAll(); }
+  }
+
+  function drawAreas(colors) {
+    cov.polys.forEach(function (p) { p.setMap(null); });
+    cov.polys = [];
+    drv.data.drivers.forEach(function (d) {
+      var on = d.id === cov.driverId;
+      d.areas.forEach(function (ring, i) {
+        var poly = new google.maps.Polygon({
+          map: cov.map, paths: ring.map(function (p) { return { lat: p[0], lng: p[1] }; }),
+          strokeColor: colors[d.id], strokeOpacity: 0.95, strokeWeight: on ? 3 : 2,
+          fillColor: colors[d.id], fillOpacity: on ? 0.35 : 0.15, zIndex: on ? 2 : 1
+        });
+        poly.addListener('click', function () { onAreaClick(d.id, i); });
+        cov.polys.push(poly);
+      });
+    });
+  }
+
+  function onAreaClick(id, i) {
+    var d = drv.data.drivers.filter(function (x) { return x.id === id; })[0];
+    if (!d) return;
+    if (cov.tool === 'erase') {
+      changeAreas(d, d.areas.filter(function (r, k) { return k !== i; }), 'Removed an area from ' + d.name + '. Undo puts it back.');
+    } else {
+      cov.driverId = id;
+      renderCoverage();
+    }
+  }
+
+  /** Replaces a driver's areas (remembering the old ones for Undo) and saves. */
+  function changeAreas(d, areas, msg) {
+    cov.undo.push({ id: d.id, areas: d.areas, color: d.color });
+    if (cov.undo.length > 30) cov.undo.shift();
+    d.areas = phloNormalizeAreas(areas);
+    if (d.areas.length && !d.color) d.color = phloDriverColors(drv.data.drivers)[d.id];
+    commitDrivers();
+    if (msg) toast(msg);
+  }
+
+  function undoArea() {
+    var h = cov.undo.pop();
+    var d = h && drv.data.drivers.filter(function (x) { return x.id === h.id; })[0];
+    if (!d) { renderCoverage(); return; }
+    d.areas = h.areas; d.color = h.color;
+    cov.driverId = d.id;
+    commitDrivers();
+  }
+
+  function clearAreas() {
+    var d = covDriver();
+    if (!d || !d.areas.length) return;
+    if (!confirm('Remove all ' + d.areas.length + ' area' + (d.areas.length === 1 ? '' : 's') + ' for ' + d.name + '?')) return;
+    changeAreas(d, [], 'Cleared ' + d.name + '\'s areas. Undo puts them back.');
+  }
+
+  function setTool(tool) {
+    if (cov.drawing) return;
+    cov.tool = tool;
+    renderCoverage();
+  }
+
+  function fitAll() {
+    if (!cov.map) return;
+    var b = new google.maps.LatLngBounds(), n = 0;
+    drv.data.drivers.forEach(function (d) {
+      d.areas.forEach(function (ring) { ring.forEach(function (p) { b.extend({ lat: p[0], lng: p[1] }); n++; }); });
+      [d.startPin, d.endPin].forEach(function (p) { if (p) { b.extend({ lat: p.lat, lng: p.lng }); n++; } });
+    });
+    if (n > 1) cov.map.fitBounds(b, 40);
+    else if (n === 1) { cov.map.setCenter(b.getCenter()); cov.map.setZoom(13); }
+  }
+
+  function ensureMap() {
+    if (cov.map || cov.loading) return;
+    var status = $('cov-status');
+    status.hidden = false;
+    if (!phloMaps.enabled) { status.textContent = 'The map needs the Google Maps key (mapsApiKey in config.js, see the README).'; return; }
+    status.textContent = 'Loading map…';
+    cov.loading = phloMaps.library('maps').then(function (lib) {
+      cov.map = new lib.Map($('cov-map'), {
+        center: { lat: 34.05, lng: -118.25 }, zoom: 10, clickableIcons: false,
+        mapTypeControl: false, streetViewControl: false, fullscreenControl: false
+      });
+      // An empty overlay, only to turn screen pixels into map coordinates while drawing.
+      cov.ov = new lib.OverlayView();
+      cov.ov.onAdd = cov.ov.draw = cov.ov.onRemove = function () {};
+      cov.ov.setMap(cov.map);
+      status.hidden = true;
+      cov.loading = null;
+      if (!drv.data.drivers.some(function (d) { return d.areas.length; })) fitAll();
+      renderCoverage();
+    }).catch(function (e) {
+      cov.loading = null;
+      status.textContent = 'Could not load the map: ' + e.message;
+    });
+  }
+
+  function padPoint(e) { var r = $('cov-draw').getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+  function toLatLng(p) { return cov.ov.getProjection().fromContainerPixelToLatLng(new google.maps.Point(p[0], p[1])); }
+
+  function drawStart(e) {
+    var d = covDriver();
+    if (!d || !cov.map || cov.drawing || e.button > 0 || !cov.ov.getProjection()) return;
+    if (d.areas.length >= MAX_AREAS) { toast(d.name + ' already has ' + MAX_AREAS + ' areas. Erase one first.'); return; }
+    e.preventDefault();
+    $('cov-draw').setPointerCapture(e.pointerId);
+    var p = padPoint(e);
+    var line = new google.maps.Polyline({ map: cov.map, clickable: false, strokeColor: phloDriverColors(drv.data.drivers)[d.id], strokeWeight: 3, zIndex: 3 });
+    line.getPath().push(toLatLng(p));
+    cov.drawing = { pointer: e.pointerId, pts: [p], line: line };
+  }
+
+  function drawMove(e) {
+    var s = cov.drawing;
+    if (!s || e.pointerId !== s.pointer) return;
+    var p = padPoint(e), last = s.pts[s.pts.length - 1];
+    if (Math.abs(p[0] - last[0]) + Math.abs(p[1] - last[1]) < 3) return;
+    s.pts.push(p);
+    s.line.getPath().push(toLatLng(p));
+  }
+
+  function drawEnd(e) {
+    var s = cov.drawing;
+    if (!s || e.pointerId !== s.pointer) return;
+    cov.drawing = null;
+    s.line.setMap(null);
+    if (e.type === 'pointercancel') return;
+    var xs = s.pts.map(function (p) { return p[0]; }), ys = s.pts.map(function (p) { return p[1]; });
+    var d = covDriver();
+    if (!d || Math.max.apply(null, xs) - Math.min.apply(null, xs) < 12 || Math.max.apply(null, ys) - Math.min.apply(null, ys) < 12) {
+      toast('Too small for an area: hold the button down and draw all the way around it.');
+      return;
+    }
+    var pts = s.pts, tol = 1.5;
+    do { pts = phloSimplifyPath(s.pts, tol); tol *= 1.5; } while (pts.length > MAX_AREA_POINTS);
+    if (pts.length < 3) return;
+    var ring = pts.map(function (p) { var ll = toLatLng(p); return [ll.lat(), ll.lng()]; });
+    changeAreas(d, d.areas.concat([ring]), 'Added an area for ' + d.name + '.');
+  }
+
+  // Scroll-wheel zoom still works while the pencil is on.
+  function drawWheel(e) {
+    if (!cov.map) return;
+    e.preventDefault();
+    var now = Date.now();
+    if (now - cov.wheelAt < 200) return;
+    cov.wheelAt = now;
+    cov.map.setZoom(cov.map.getZoom() + (e.deltaY < 0 ? 1 : -1));
+  }
+
+  function downloadAreas() {
+    var blob = new Blob([JSON.stringify(phloAreasGeoJson(drv.data.drivers), null, 1)], { type: 'application/geo+json' });
+    var a = el('a', { href: URL.createObjectURL(blob), download: phloFmt(todayLocal(), 'MM.dd.yy') + '_DRIVER_AREAS.geojson' });
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+
   // Nothing is shown until an allowed account signs in.
   function showView(name) {
     state.view = name;
@@ -761,6 +966,7 @@
     });
     $('view-master').hidden = name !== 'master';
     $('view-drivers').hidden = name !== 'drivers';
+    if (name === 'drivers') ensureMap();
     try { localStorage.setItem('phlo.view', name); } catch (e) { /* storage blocked */ }
   }
 
@@ -820,6 +1026,19 @@
       phloMaps.attach(input, function (pin) { formPins[k] = pin; renderPinNote(k); });
     });
     $('download-drivers').addEventListener('click', downloadDrivers);
+    document.querySelectorAll('.cov-tools [data-tool]').forEach(function (b) {
+      b.addEventListener('click', function () { setTool(b.getAttribute('data-tool')); });
+    });
+    $('cov-undo').addEventListener('click', undoArea);
+    $('cov-clear').addEventListener('click', clearAreas);
+    $('cov-fit').addEventListener('click', fitAll);
+    $('cov-download').addEventListener('click', downloadAreas);
+    var pad = $('cov-draw');
+    pad.addEventListener('pointerdown', drawStart);
+    pad.addEventListener('pointermove', drawMove);
+    pad.addEventListener('pointerup', drawEnd);
+    pad.addEventListener('pointercancel', drawEnd);
+    pad.addEventListener('wheel', drawWheel, { passive: false });
     loadLocalDrivers();
     renderDrivers();
     // Older versions kept past deliveries (patient data) in the browser: delete any copy left behind.

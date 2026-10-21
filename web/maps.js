@@ -1,30 +1,29 @@
 /* PHLO Google Maps address search for the driver form.
  * Typing in an address field shows Google's suggestions; picking one fills in the full address and
  * gives back its map pin (lat/lng + place id), which later route planning can use.
+ * Also loads the map for drawing driver areas (library('maps')).
  * Only runs when config.js has a mapsApiKey; without one the fields stay plain text boxes. */
 (function () {
   'use strict';
 
   var CFG = window.PHLO_CONFIG || {};
   var KEY = CFG.mapsApiKey || '';
-  var lib = null;      // the loaded google.maps.places library, once ready
-  var loading = null;  // promise while the script loads
   var failed = '';     // why Maps can't be used, if it failed
   var uid = 0;
 
-  function load() {
-    if (lib) return Promise.resolve(lib);
+  var base = null;     // promise for the Google Maps script itself
+  var libs = {};       // loaded libraries by name ('places', 'maps')
+
+  function loadBase() {
     if (failed) return Promise.reject(new Error(failed));
-    if (loading) return loading;
-    loading = new Promise(function (resolve, reject) {
+    if (base) return base;
+    base = new Promise(function (resolve, reject) {
       // Google calls this when the key is wrong or the domain isn't allowed for it.
       window.gm_authFailure = function () {
         failed = 'Google Maps rejected the key. Check mapsApiKey in config.js and the key\'s allowed websites.';
         if (window.phloMaps.onError) window.phloMaps.onError(failed);
       };
-      window.__phloMapsLoaded = function () {
-        google.maps.importLibrary('places').then(function (places) { lib = places; resolve(lib); }, reject);
-      };
+      window.__phloMapsLoaded = function () { resolve(); };
       var s = document.createElement('script');
       s.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(KEY) +
         '&v=weekly&loading=async&callback=__phloMapsLoaded';
@@ -33,11 +32,22 @@
       document.head.appendChild(s);
     }).catch(function (e) {
       failed = failed || e.message || 'Could not load Google Maps.';
-      loading = null;
+      base = null;
       throw new Error(failed);
     });
-    return loading;
+    return base;
   }
+
+  /** Loads one Google Maps library ('places', 'maps', ...) and gives it back. */
+  function library(name) {
+    if (!KEY) return Promise.reject(new Error('No Google Maps key in config.js.'));
+    if (libs[name]) return libs[name];
+    libs[name] = loadBase().then(function () { return google.maps.importLibrary(name); });
+    libs[name].catch(function () { delete libs[name]; });
+    return libs[name];
+  }
+
+  function load() { return library('places'); }
 
   /** Adds Google suggestions to `input`. onPick({address, lat, lng, placeId}) runs after a pick. */
   function attach(input, onPick) {
@@ -127,5 +137,5 @@
     });
   }
 
-  window.phloMaps = { enabled: !!KEY, attach: attach, onError: null };
+  window.phloMaps = { enabled: !!KEY, attach: attach, library: library, onError: null };
 })();

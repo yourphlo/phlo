@@ -53,6 +53,19 @@ Availability can be just a start time, just an end time, both, or empty. Lunch b
 3. **Download drivers .xlsx** saves the working drivers (`10.21.26_DRIVERS.xlsx`), one row per
    driver with the fields above.
 
+**Coverage map** (bottom of the Drivers tab): shows the area each driver covers, one colour per driver.
+
+1. Click a driver's name above the map, then **Pencil**.
+2. Hold the mouse button (or your finger) down and draw around their area; let go to close the shape.
+   Draw as many areas per driver as you need. The scroll wheel still zooms while the pencil is on.
+3. **Move** pans and zooms the map, **Erase** removes the area you click, **Undo** takes back the last
+   change, **Clear driver** removes all of that driver's areas, **Fit all** zooms to every area.
+4. **Download areas** saves them as a `.geojson` file (e.g. `10.21.26_DRIVER_AREAS.geojson`) you can
+   share or open in geojson.io.
+
+Areas are saved inside each driver's profile, so they sync to your Google account like the rest.
+The map uses the same Google Maps key as the address suggestions.
+
 When you're signed in, profiles are saved to your own Google account (a hidden app folder in
 your Google Drive), so they show up on any computer once you sign in with the same account.
 Signed out, they are kept in that browser only and uploaded the next time you sign in.

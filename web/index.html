@@ -169,6 +169,32 @@
         <p class="muted small">Tick who is working on the date above. Click a name to edit.</p>
         <ul id="drivers" class="drivers"></ul>
       </section>
+
+      <section id="coverage-card" class="card">
+        <div class="table-head">
+          <h2>Coverage map <span id="coverage-count" class="pill"></span></h2>
+          <div class="actions">
+            <button type="button" id="cov-fit" class="btn ghost">Fit all</button>
+            <button type="button" id="cov-download" class="btn" disabled>Download areas</button>
+          </div>
+        </div>
+        <p class="muted small" id="cov-help">Pick a driver, choose the <b>Pencil</b>, and draw around the area they cover
+          (hold the mouse button or your finger down and let go to close the shape). Draw as many areas per driver as you need.
+          <b>Move</b> pans and zooms the map; <b>Erase</b> removes the area you click.</p>
+        <div id="cov-drivers" class="cov-drivers" role="radiogroup" aria-label="Driver to draw for"></div>
+        <div class="cov-tools" role="toolbar" aria-label="Map tools">
+          <button type="button" class="tool" data-tool="pencil" aria-pressed="false">&#9998; Pencil</button>
+          <button type="button" class="tool" data-tool="move" aria-pressed="true">&#10021; Move</button>
+          <button type="button" class="tool" data-tool="erase" aria-pressed="false">&#10007; Erase</button>
+          <button type="button" id="cov-undo" class="tool" disabled>&#8630; Undo</button>
+          <button type="button" id="cov-clear" class="tool" disabled>Clear driver</button>
+        </div>
+        <div class="cov-map-wrap">
+          <div id="cov-map" class="cov-map"></div>
+          <div id="cov-draw" class="cov-draw" hidden></div>
+          <p id="cov-status" class="cov-status muted" hidden></p>
+        </div>
+      </section>
     </div>
   </main>
 

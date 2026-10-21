@@ -132,6 +132,22 @@ const roster = ctx.phloDriversData({ drivers: [{ id: 'a', name: 'A' }, { id: 'b'
 eq([ctx.phloRosterFor(roster, '2026-10-18'), ctx.phloRosterFor(roster, '2026-10-20'), ctx.phloRosterFor(roster, '2026-10-21')], [['a', 'b'], ['a'], ['b']], 'roster fallback');
 eq(Object.keys(roster.roster), ['2026-10-19', '2026-10-21'], 'roster drops bad keys');
 
+/* ---------- coverage areas ---------- */
+eq(ctx.phloNormalizeAreas([[[34.123456, -118.1], ['34.2', '-118.2'], [34.2, -118.2], [34.3, -118.0], [34.123456, -118.1]], [[1, 2], [3, 4]], 'x', [[91, 0], [0, 0], [1, 1], [2, 2]]]),
+  [[[34.12346, -118.1], [34.2, -118.2], [34.3, -118]], [[0, 0], [1, 1], [2, 2]]], 'areas: rounded, deduped, open, bad points and short outlines dropped');
+eq(ctx.phloNormalizeAreas(null), [], 'no areas');
+eq(ctx.phloSimplifyPath([[0, 0], [1, 0.2], [2, -0.1], [3, 0], [3, 5], [3.1, 10]], 1), [[0, 0], [3, 0], [3.1, 10]], 'simplify drops points on a straight run');
+eq(ctx.phloSimplifyPath([[0, 0], [5, 5]], 1), [[0, 0], [5, 5]], 'simplify keeps short lines');
+const area = [[34, -118], [34.1, -118], [34.1, -118.1]];
+const withAreas = ctx.phloNormalizeDriver({ id: 'z', name: 'Z', startAddress: 'x', areas: [area], color: '#ABCDEF' });
+eq([withAreas.areas, withAreas.color], [[area], '#abcdef'], 'driver keeps areas + colour');
+eq(ctx.phloNormalizeDriver({ name: 'Z', color: 'red' }).color, '', 'bad colour dropped');
+eq(ctx.phloDriverColors([{ id: 'a', color: '' }, { id: 'b', color: '#d1495b' }, { id: 'c', color: '' }]), { b: '#d1495b', a: '#2b7bba', c: '#2a9d5c' }, 'colours: saved kept, others get unused ones');
+const gj = ctx.phloAreasGeoJson([withAreas, ctx.phloNormalizeDriver({ id: 'y', name: 'Y' })]);
+eq(gj.features.length, 1, 'geojson skips drivers with no areas');
+eq([gj.features[0].properties.driver, gj.features[0].geometry.coordinates], ['Z', [[[[-118, 34], [-118, 34.1], [-118.1, 34.1], [-118, 34]]]]], 'geojson is lng,lat and closed');
+eq(ctx.phloDriverRows([withAreas])[0].length, 11, 'areas not in the drivers export');
+
 try { execFileSync('node', [path.join(root, 'scripts/sync-apps-script.js'), '--check'], { stdio: 'inherit' }); }
 catch (e) { failures++; }
 
