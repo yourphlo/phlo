@@ -96,6 +96,7 @@
     $('signout').hidden = false;
     $('build').disabled = false;
     loadDriversFromDrive();
+    loadHistoryFromDrive();
     api('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)').then(function (r) {
       $('who').textContent = r.user && r.user.emailAddress || '';
     }).catch(function () { /* not important */ });
@@ -106,7 +107,9 @@
     state.token = null;
     $('signin').hidden = false; $('signout').hidden = true; $('build').disabled = true; $('who').textContent = '';
     drv.fileId = null; drv.synced = false;
+    hist.fileId = null; hist.synced = false;
     renderSyncNote();
+    renderHistory();
   }
 
   function withToken() {
@@ -221,17 +224,19 @@
       return readStore(store, delivery).then(function (r) {
         if (!r) {
           status.className = 'status warn'; status.textContent = 'no file found';
-          return { store: store, rows: [], problem: 'No sheet found in Drive' };
+          return { store: store, rows: [], failed: true, problem: 'No sheet found in Drive' };
         }
         var rows = phloStoreRows(r.values, store, delivery);
+        var past = {};
+        pastDays(delivery).forEach(function (iso) { past[iso] = phloStoreRows(r.values, store, fromIso(iso)); });
         status.className = 'status ' + (rows.length ? 'ok' : 'warn');
         status.textContent = rows.length + ' row' + (rows.length === 1 ? '' : 's');
         meta.textContent = [relTime(r.file.modifiedTime), r.tabs.join(', ') || r.note].filter(Boolean).join(' · ');
-        return { store: store, rows: rows, problem: rows.length ? '' : 'Nothing for this date yet' + (r.note ? ' (' + r.note + ')' : '') };
+        return { store: store, rows: rows, past: past, problem: rows.length ? '' : 'Nothing for this date yet' + (r.note ? ' (' + r.note + ')' : '') };
       }).catch(function (e) {
         status.className = 'status error'; status.textContent = 'error';
         meta.textContent = e.message;
-        return { store: store, rows: [], problem: 'Could not read: ' + e.message };
+        return { store: store, rows: [], failed: true, problem: 'Could not read: ' + e.message };
       });
     });
 
@@ -239,12 +244,17 @@
       state.built = { delivery: delivery, stores: all };
       state.rows = [];
       all.forEach(function (r) { state.rows = state.rows.concat(r.rows); });
+      savePastDays(delivery, all);
+      var carried = carryOver();
+      saveToday('built');
       renderTable();
       runChecks();
+      renderHistory();
       $('download').disabled = !state.rows.length;
       $('build').disabled = false;
       $('compare-card').hidden = false;
-      toast('Built ' + state.rows.length + ' rows for ' + niceDate(delivery));
+      toast('Built ' + state.rows.length + ' rows for ' + niceDate(delivery) +
+        (carried ? ' (' + carried + ' carried over: not confirmed delivered)' : ''));
     });
   }
 
@@ -259,7 +269,12 @@
       var tr = el('tr', { 'data-row': i });
       if (r[2] !== prevCode) tr.className = 'store-start';
       prevCode = r[2];
-      tr.appendChild(el('td', { class: 'num', text: String(i + 2) }));
+      var num = el('td', { class: 'num', text: String(i + 2) });
+      if (r.carry) {
+        tr.classList.add('carried');
+        num.appendChild(el('span', { class: 'carry-tag', title: carryText(r.carry), text: 'from ' + shortDate(r.carry.lastIso) }));
+      }
+      tr.appendChild(num);
       [0, 1, 2, 3].forEach(function (c) {
         var td = el('td', { contenteditable: 'true', spellcheck: 'false', 'data-col': c, class: c === 2 ? 'code' : '' });
         td.textContent = r[c] == null ? '' : String(r[c]);
@@ -276,6 +291,9 @@
   var checkTimer;
   function runChecks() {
     var checks = phloCheckRows(state.rows);
+    state.rows.forEach(function (r, i) {
+      if (r.carry) checks.push({ row: i, level: r.carry.missed ? 'warn' : 'info', message: 'Carried over: ' + carryText(r.carry) });
+    });
     (state.built ? state.built.stores : []).forEach(function (s) {
       if (s.problem) checks.unshift({ row: -1, level: s.rows.length ? 'info' : 'warn', message: s.store.code + ': ' + s.problem });
     });
@@ -333,6 +351,7 @@
     var i = +btn.closest('tr').getAttribute('data-row');
     var removed = state.rows.splice(i, 1)[0];
     renderTable(); runChecks();
+    if (!removed.carry) saveToday('built');
     toast('Deleted ' + (removed[0] || 'row'));
   }
 
@@ -348,6 +367,8 @@
     var wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
     XLSX.writeFile(wb, phloFmt(d, 'MM.dd.yy') + '_UPLOAD.xlsx');
+    saveToday('download');
+    renderHistory();
   }
 
   /* ---------------- compare a finished file ---------------- */
@@ -361,6 +382,10 @@
         .filter(function (r) { return String(r[0] || '').trim() !== ''; });
       if (rows.length && /^NAME$/i.test(String(rows[0][0]).trim())) rows.shift();
       renderCompare(file.name, rows, phloCompare(state.rows, rows));
+      // The finished file is what went to Routific: remember its tickets for this date.
+      if (rows.length && phloSaveDay(hist.data, isoDate(state.built.delivery), rows, 'file', new Date().toISOString())) {
+        commitHistory();
+      }
     };
     reader.readAsArrayBuffer(file);
   }
@@ -400,6 +425,311 @@
       })));
     }
     if (!problems && !result.checks.length) out.appendChild(el('p', { class: 'good', text: 'The file matches the store sheets. Nothing to fix.' }));
+  }
+
+  /* ---------------- delivery history (tickets carried over) ---------------- */
+
+  // Each day's master tickets and which were delivered, saved in the user's Drive appDataFolder
+  // (like the drivers) with a copy in this browser.
+  var HISTORY_FILE = 'phlo-history.json';
+  var HISTORY_KEY = 'phlo.history';
+  var hist = { data: phloHistoryData(null), fileId: null, synced: false, saving: null, pending: false, timer: null, note: '', open: {} };
+  var SOURCE_LABEL = { download: 'downloaded master', file: 'checked upload file', built: 'built in the app', rebuilt: 'rebuilt from the store sheets' };
+
+  function shortDate(iso) { var p = iso.split('-'); return +p[1] + '/' + +p[2]; }
+  function pastDays(delivery) { return phloLookbackDays(isoDate(delivery), PHLO_HISTORY_LOOKBACK); }
+
+  function carryText(c) {
+    var how = c.missed ? 'not delivered on ' : 'not confirmed delivered on ';
+    var s = how + niceDate(fromIso(c.lastIso));
+    if (c.firstIso !== c.lastIso) s += ' (on the master since ' + niceDate(fromIso(c.firstIso)) + ')';
+    return s + ' - RX ' + c.rx.join(', ');
+  }
+
+  function loadLocalHistory() {
+    try { hist.data = phloHistoryData(JSON.parse(localStorage.getItem(HISTORY_KEY) || 'null')); } catch (e) { /* storage blocked or bad JSON */ }
+  }
+  function saveLocalHistory() {
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(hist.data)); } catch (e) { /* storage blocked or full */ }
+  }
+
+  function loadHistoryFromDrive() {
+    var url = DRIVE + '?spaces=appDataFolder&fields=files(id)&pageSize=1&q=' +
+      encodeURIComponent("name = '" + HISTORY_FILE + "' and trashed = false");
+    api(url).then(function (r) {
+      hist.fileId = r.files && r.files[0] ? r.files[0].id : null;
+      return hist.fileId ? api(DRIVE + '/' + hist.fileId + '?alt=media') : null;
+    }).then(function (remote) {
+      remote = phloHistoryData(remote);
+      var merged = phloMergeHistory(hist.data, remote);
+      var changed = JSON.stringify(merged.days) !== JSON.stringify(remote.days);
+      hist.data = merged; saveLocalHistory();
+      hist.synced = !changed;
+      if (changed) pushHistory();
+      afterStatusChange(true);
+    }).catch(function (e) {
+      hist.note = 'Could not load the delivery history from Google (' + e.message + '). Using this device\'s copy.';
+      renderHistory();
+    });
+  }
+
+  function pushHistory() {
+    if (hist.saving) { hist.pending = true; return hist.saving; }
+    var body = JSON.stringify(hist.data);
+    var req;
+    if (hist.fileId) {
+      req = api('https://www.googleapis.com/upload/drive/v3/files/' + hist.fileId + '?uploadType=media&fields=id', false,
+        { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: body });
+    } else {
+      var boundary = 'phlo' + Date.now();
+      var multipart = '--' + boundary + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' +
+        JSON.stringify({ name: HISTORY_FILE, parents: ['appDataFolder'], mimeType: 'application/json' }) +
+        '\r\n--' + boundary + '\r\nContent-Type: application/json\r\n\r\n' + body + '\r\n--' + boundary + '--';
+      req = api('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', false,
+        { method: 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + boundary }, body: multipart });
+    }
+    hist.saving = req.then(function (r) {
+      hist.fileId = r.id; hist.synced = true; hist.note = '';
+    }).catch(function (e) {
+      hist.synced = false;
+      toast('Could not save the delivery history to Google: ' + e.message);
+    }).then(function () {
+      hist.saving = null;
+      if (hist.pending) { hist.pending = false; return pushHistory(); }
+      renderHistory();
+    });
+    return hist.saving;
+  }
+
+  function commitHistory() {
+    phloPruneHistory(hist.data, isoDate(todayLocal()));
+    hist.data.updatedAt = new Date().toISOString();
+    saveLocalHistory();
+    hist.synced = false;
+    clearTimeout(hist.timer);
+    if (signedIn()) hist.timer = setTimeout(pushHistory, 800);
+    renderHistory();
+  }
+
+  /** Saves the past days rebuilt from the store sheets (a saved master for that day is never replaced). */
+  function savePastDays(delivery, all) {
+    var now = new Date().toISOString(), changed = false;
+    pastDays(delivery).forEach(function (iso) {
+      var rows = [], failed = [];
+      all.forEach(function (r) {
+        if (r.failed) failed.push(r.store.code);
+        else rows = rows.concat(r.past[iso] || []);
+      });
+      // A store that could not be read this time keeps the rows it had before.
+      var old = hist.data.days[iso];
+      if (old && old.source === 'rebuilt') old.rows.forEach(function (r) { if (failed.indexOf(r[2]) >= 0) rows.push(r); });
+      if (rows.length && phloSaveDay(hist.data, iso, rows, 'rebuilt', now)) changed = true;
+    });
+    if (changed) commitHistory();
+  }
+
+  /** Puts every ticket not confirmed delivered on a past master into this master. Returns how many rows. */
+  function carryOver() {
+    if (!state.built) return 0;
+    var own = state.rows.filter(function (r) { return !r.carry; });
+    var items = phloOutstanding(hist.data, isoDate(state.built.delivery), own);
+    var rows = own.slice();
+    items.forEach(function (it) {
+      var row = it.row.slice(0, 4);
+      row.carry = it;
+      // Right after the same store's rows, so the master stays grouped by store.
+      var at = -1;
+      rows.forEach(function (r, i) { if (r[2] === row[2]) at = i; });
+      if (at < 0) rows.push(row); else rows.splice(at + 1, 0, row);
+    });
+    state.rows = rows;
+    return items.length;
+  }
+
+  function saveToday(source) {
+    if (!state.built || !state.rows.length) return;
+    var rows = state.rows.map(function (r) { return r.slice(0, 4); });
+    if (phloSaveDay(hist.data, isoDate(state.built.delivery), rows, source, new Date().toISOString())) commitHistory();
+  }
+
+  /** After a delivered/not delivered change: refresh the carried rows in the built master. */
+  function afterStatusChange(quiet) {
+    if (state.built) {
+      carryOver();
+      renderTable(); runChecks();
+      saveToday('built');
+      $('download').disabled = !state.rows.length;
+    }
+    renderHistory();
+    if (!quiet) commitHistory();
+  }
+
+  function historyRefIso() { return $('date').value || isoDate(phloAddDays(todayLocal(), 1)); }
+
+  function renderHistory() {
+    var card = $('history-card');
+    if (!card) return;
+    var ref = historyRefIso();
+    var days = hist.data.days;
+    var look = phloLookbackDays(ref, PHLO_HISTORY_LOOKBACK);
+    var show = Object.keys(days).filter(function (iso) {
+      if (iso >= ref) return false;
+      if (look.indexOf(iso) >= 0) return true;
+      var c = phloDayCounts(days[iso]);
+      return c.open + c.missed > 0;
+    });
+    look.forEach(function (iso) { if (show.indexOf(iso) < 0) show.push(iso); });
+    show.sort().reverse();
+
+    var open = phloOutstanding(hist.data, ref, state.built && isoDate(state.built.delivery) === ref ? state.rows.filter(function (r) { return !r.carry; }) : []);
+    var openRx = 0; open.forEach(function (o) { openRx += o.rx.length; });
+    $('history-count').textContent = openRx ? String(openRx) : '';
+    var lead = $('history-lead');
+    if (openRx) {
+      lead.className = 'history-lead warn';
+      lead.textContent = openRx + ' ticket' + (openRx === 1 ? ' is' : 's are') + ' on an earlier master and not confirmed delivered. ' +
+        (state.built ? 'They are in this master (marked "from …").' : 'Build the master and they are added to it.') +
+        ' Drop the Routific export for each day, or tick what was delivered, to take them off.';
+    } else {
+      lead.className = 'history-lead ok';
+      lead.textContent = Object.keys(days).length ? 'Every ticket on the earlier masters is confirmed delivered or already on this master.' :
+        'No earlier masters saved yet. Build the master and the past ' + PHLO_HISTORY_LOOKBACK + ' delivery days are rebuilt from the store sheets and saved here.';
+    }
+    var sync = hist.note || (signedIn() ? (hist.saving ? 'Saving…' : hist.synced ? 'Saved to your Google account.' : 'Not saved to Google yet.') :
+      'Saved on this device only. Sign in to keep it in your Google account.');
+    $('history-sync').textContent = sync;
+
+    var ul = $('history');
+    ul.textContent = '';
+    show.forEach(function (iso) { ul.appendChild(historyDayItem(iso, days[iso])); });
+  }
+
+  function historyDayItem(iso, day) {
+    var head = el('div', { class: 'hday-head' }, [el('b', { text: niceDate(fromIso(iso)) })]);
+    if (!day || !day.rows.length) {
+      var built = state.built && pastDays(state.built.delivery).indexOf(iso) >= 0;
+      head.appendChild(el('span', { class: 'muted small', text: built ? 'no tickets for this day in the store sheets' :
+        'no master saved yet - build the master to rebuild it from the store sheets' }));
+      var li0 = el('li', { class: 'hday' }, [head]);
+      if (day && day.routific) li0.appendChild(routificLine(iso, day));
+      return li0;
+    }
+    var c = phloDayCounts(day);
+    head.appendChild(el('span', { class: 'muted small', text: c.total + ' ticket' + (c.total === 1 ? '' : 's') + ' · ' + SOURCE_LABEL[day.source] }));
+    var pills = el('div', { class: 'hday-pills' }, [
+      el('span', { class: 'hp ok', text: c.delivered + ' delivered' }),
+      c.missed ? el('span', { class: 'hp bad', text: c.missed + ' not delivered' }) : null,
+      c.open ? el('span', { class: 'hp open', text: c.open + ' not confirmed' }) : null
+    ]);
+    var all = el('button', { class: 'btn small-btn', type: 'button', text: 'Mark the rest delivered' });
+    all.disabled = !c.open;
+    all.addEventListener('click', function () {
+      if (!confirm('Mark the ' + c.open + ' unconfirmed ticket' + (c.open === 1 ? '' : 's') + ' on ' + niceDate(fromIso(iso)) + ' as delivered?' +
+        (c.missed ? ' (The ' + c.missed + ' not delivered stay not delivered.)' : ''))) return;
+      phloMarkRx(hist.data, iso, phloDayRx(day).filter(function (n) { return !day.status[n]; }), 'delivered');
+      afterStatusChange();
+    });
+    var li = el('li', { class: 'hday' }, [el('div', { class: 'hday-top' }, [head, pills, all])]);
+    if (day.routific) li.appendChild(routificLine(iso, day));
+
+    // Ticket list: open and not delivered first.
+    var rank = function (r) {
+      var rx = phloRxNumbers(r[0]);
+      if (rx.some(function (n) { return day.status[n] === 'missed'; })) return 0;
+      if (rx.some(function (n) { return !day.status[n]; })) return 1;
+      return 2;
+    };
+    var rows = day.rows.slice().sort(function (a, b) { return rank(a) - rank(b); });
+    var det = el('details', { class: 'hday-list' }, [el('summary', { text: 'Tickets (' + day.rows.length + ')' })]);
+    var fill = function () {
+      if (det.querySelector('ul')) return;
+      var list = el('ul', {});
+      rows.forEach(function (r) {
+        var rx = phloRxNumbers(r[0]);
+        if (!rx.length) return;
+        var st = rx.every(function (n) { return day.status[n] === 'delivered'; }) ? 'delivered' :
+          rx.some(function (n) { return day.status[n] === 'missed'; }) ? 'missed' : 'open';
+        var box = el('input', { type: 'checkbox', 'aria-label': 'Delivered: ' + r[0] });
+        box.checked = st === 'delivered';
+        box.addEventListener('change', function () {
+          phloMarkRx(hist.data, iso, rx, box.checked ? 'delivered' : null);
+          afterStatusChange();
+        });
+        list.appendChild(el('li', { class: st }, [
+          el('label', {}, [box, el('span', { class: 'tname', text: r[0] }), el('span', { class: 'muted', text: ' · ' + r[2] })]),
+          st === 'missed' ? el('span', { class: 'hp bad', text: 'not delivered' }) : st === 'open' ? el('span', { class: 'hp open', text: 'not confirmed' }) : null
+        ]));
+      });
+      det.appendChild(list);
+    };
+    // Stays open while ticking boxes (the panel is redrawn after each change).
+    if (hist.open[iso]) { det.open = true; fill(); }
+    det.addEventListener('toggle', function () {
+      if (det.open) { hist.open[iso] = true; fill(); } else delete hist.open[iso];
+    });
+    li.appendChild(det);
+    return li;
+  }
+
+  function routificLine(iso, day) {
+    var r = day.routific, parts = [];
+    var drivers = (r.drivers || []).map(function (d) { return d.name + ' ' + d.stops; }).join(', ');
+    parts.push('Routific (' + r.file + '): ' + r.routed + ' stop' + (r.routed === 1 ? '' : 's') + ' routed' + (drivers ? ' (' + drivers + ')' : '') +
+      (r.unscheduled ? ', ' + r.unscheduled + ' unscheduled' : ', none unscheduled') + '.');
+    var level = 'info';
+    if (r.kind === 'summary') {
+      var stops = day.rows.length;
+      if (stops) {
+        var total = r.routed + r.unscheduled;
+        parts.push('The master had ' + stops + ' stop' + (stops === 1 ? '' : 's') + (total !== stops ? ' but Routific had ' + total + ' - check for missing or added stops.' : ', same as Routific.'));
+        if (total !== stops) level = 'warn';
+      }
+      if (r.unscheduled) { parts.push(r.unscheduled + ' stop' + (r.unscheduled === 1 ? ' was' : 's were') + ' not on any route, so not delivered.'); level = 'warn'; }
+      parts.push('A summary has no ticket numbers, so it cannot say which tickets were delivered: export the stops from Routific (or tick them below).');
+    } else if (!r.hasStatus) {
+      parts.push('No delivery status in this file, so routed stops count as delivered and unscheduled ones as not delivered.');
+    }
+    return el('p', { class: 'hday-routific ' + level, text: parts.join(' ') });
+  }
+
+  function readRoutificFiles(files) {
+    Array.prototype.forEach.call(files || [], function (file) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        var rows;
+        try {
+          var wb = XLSX.read(reader.result, { type: 'array', raw: true });
+          rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: '' });
+        } catch (e) { toast('Could not read ' + file.name); return; }
+        var parsed = phloParseRoutific(rows);
+        if (parsed.kind === 'unknown') { toast(file.name + ' does not look like a Routific export (no stop counts or RX numbers).'); return; }
+        var ref = fromIso(historyRefIso());
+        var iso = phloDateFromFileName(file.name, ref);
+        if (!iso) {
+          iso = prompt('Which delivery date is ' + file.name + ' for? (YYYY-MM-DD)', phloLookbackDays(historyRefIso(), 1)[0]);
+          if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso.trim())) return;
+          iso = iso.trim();
+        }
+        var day = hist.data.days[iso] || (hist.data.days[iso] = phloHistoryDay({ rows: [], source: 'rebuilt' }));
+        day.routific = {
+          kind: parsed.kind, file: file.name, at: new Date().toISOString(), routed: parsed.routed,
+          unscheduled: parsed.unscheduled, drivers: parsed.drivers, hasStatus: parsed.hasStatus,
+          stops: parsed.kind === 'stops' ? parsed.stops : null
+        };
+        var msg = niceDate(fromIso(iso)) + ': ';
+        if (parsed.kind === 'stops') {
+          var res = phloApplyRoutific(hist.data, iso, parsed);
+          msg += day.rows.length ? res.delivered + ' delivered, ' + res.missed + ' not delivered' +
+            (res.notOnMaster.length ? ', ' + res.notOnMaster.length + ' not on the saved master' : '') :
+            'saved; it is applied once that day\'s master is rebuilt (build the master)';
+        } else {
+          msg += 'route summary saved (stop counts only, no ticket numbers)';
+        }
+        toast(msg);
+        afterStatusChange();
+      };
+      reader.readAsArrayBuffer(file);
+    });
   }
 
   /* ---------------- driver profiles ---------------- */
@@ -702,6 +1032,14 @@
     $('download-drivers').addEventListener('click', downloadDrivers);
     loadLocalDrivers();
     renderDrivers();
+    loadLocalHistory();
+    renderHistory();
+    $('date').addEventListener('change', renderHistory);
+    $('routific-file').addEventListener('change', function (e) { readRoutificFiles(e.target.files); e.target.value = ''; });
+    var rdrop = $('routific-drop');
+    ['dragenter', 'dragover'].forEach(function (t) { rdrop.addEventListener(t, function (e) { e.preventDefault(); rdrop.classList.add('over'); }); });
+    ['dragleave', 'drop'].forEach(function (t) { rdrop.addEventListener(t, function () { rdrop.classList.remove('over'); }); });
+    rdrop.addEventListener('drop', function (e) { e.preventDefault(); readRoutificFiles(e.dataTransfer.files); });
     initAuth();
   });
 })();
