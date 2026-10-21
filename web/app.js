@@ -659,12 +659,22 @@
       c.missed ? el('span', { class: 'hp bad', text: c.missed + ' not delivered' }) : null,
       c.open ? el('span', { class: 'hp open', text: c.open + ' not confirmed' }) : null
     ]);
-    var all = el('button', { class: 'btn small-btn', type: 'button', text: 'Mark the rest delivered' });
-    all.disabled = !c.open;
+    // Toggle: once the rest are marked (and nothing new is unconfirmed) the button undoes that.
+    var bulk = phloBulkRx(hist.data, iso);
+    var undo = !c.open && bulk.length > 0;
+    var all = el('button', { class: 'btn small-btn', type: 'button', 'aria-pressed': undo ? 'true' : 'false',
+      title: undo ? 'Put the ' + bulk.length + ' ticket' + (bulk.length === 1 ? '' : 's') + ' this marked back to not confirmed' : '',
+      text: undo ? 'Undo mark delivered (' + bulk.length + ')' : 'Mark the rest delivered' });
+    all.disabled = !c.open && !undo;
     all.addEventListener('click', function () {
+      if (undo) {
+        phloUndoMarkRest(hist.data, iso);
+        afterStatusChange();
+        return;
+      }
       if (!confirm('Mark the ' + c.open + ' unconfirmed ticket' + (c.open === 1 ? '' : 's') + ' on ' + niceDate(fromIso(iso)) + ' as delivered?' +
-        (c.missed ? ' (The ' + c.missed + ' not delivered stay not delivered.)' : ''))) return;
-      phloMarkRx(hist.data, iso, phloDayRx(day).filter(function (n) { return !day.status[n]; }), 'delivered');
+        (c.missed ? ' (The ' + c.missed + ' not delivered stay not delivered.)' : '') + ' You can undo this.')) return;
+      phloMarkRest(hist.data, iso);
       afterStatusChange();
     });
     var li = el('li', { class: 'hday' }, [el('div', { class: 'hday-top' }, [head, pills, all])]);
