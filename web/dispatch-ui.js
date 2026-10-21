@@ -231,7 +231,7 @@
       return { id: s.id, lat: s.lat, lng: s.lng, tags: s.tags, driverId: manual && manual[s.id] };
     });
     var ds = plan.drivers.map(function (d) {
-      return { id: d.id, areas: d.src.areas, types: d.src.types, capacity: d.src.capacity, start: d.startPt };
+      return { id: d.id, areas: d.src.areas, types: d.src.types, capacity: d.src.capacity, start: d.startPt, end: d.endPt };
     });
     var res = phloAssignStops(input, ds);
     plan.stops.forEach(function (s) {
@@ -286,8 +286,11 @@
     geocoder().then(function (g) { return geocode(g, address); }).then(function (r) {
       if (r.none) { toast('Google Maps still cannot find that address.'); return; }
       stop.lat = r.lat; stop.lng = r.lng; stop.formatted = r.formatted; stop.partial = r.partial;
-      var res = phloAssignStops([{ id: stop.id, lat: r.lat, lng: r.lng, tags: stop.tags, driverId: stop.manual ? stop.driverId : null }],
-        plan.drivers.map(function (d) { return { id: d.id, areas: d.src.areas, types: d.src.types, capacity: d.src.capacity, start: d.startPt }; }))[stop.id];
+      // Check the fixed stop against the routes already planned (they stay as they are).
+      var others = plan.stops.filter(function (x) { return x !== stop && x.driverId && x.lat != null; })
+        .map(function (x) { return { id: x.id, lat: x.lat, lng: x.lng, driverId: x.driverId, fixed: true }; });
+      var res = phloAssignStops(others.concat([{ id: stop.id, lat: r.lat, lng: r.lng, tags: stop.tags, driverId: stop.manual ? stop.driverId : null }]),
+        plan.drivers.map(function (d) { return { id: d.id, areas: d.src.areas, types: d.src.types, capacity: d.src.capacity, start: d.startPt, end: d.endPt }; }))[stop.id];
       stop.driverId = res.driverId;
       stop.flags = addressFlags(res.flags);
       if (r.partial) stop.flags.push('partial');

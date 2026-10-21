@@ -170,8 +170,43 @@ const asg = ctx.phloAssignStops([
   { id: 'mid', lat: 34.05, lng: -118.02, tags: [] }, { id: 'far', lat: 34.5, lng: -118.15, tags: [] },
   { id: 'cold', lat: 34.05, lng: -118.15, tags: ['FRIDGE'] }, { id: 'lost', lat: null, lng: null, tags: [] },
   { id: 'hand', lat: 34.05, lng: -118.15, tags: [], driverId: 'B' }], ds);
-eq(Object.keys(asg).map(k => k + ':' + asg[k].driverId + ':' + asg[k].flags.join('+')),
-  ['w:A:', 'e:B:', 'lost:null:notFound', 'hand:B:manual', 'mid:A:overlap', 'far:C:outside', 'cold:C:outside'], 'assign stops (B is full, so the overlap goes to A; far goes to the nearest start)');
+eq(Object.keys(asg).sort().map(k => k + ':' + asg[k].driverId + ':' + asg[k].flags.join('+')),
+  ['cold:C:outside', 'e:B:', 'far:C:outside', 'hand:B:manual', 'lost:null:notFound', 'mid:A:overlap', 'w:A:'], 'assign stops (B is full, so the overlap goes to A; far goes to the nearest start)');
+// Yellow (Y) covers the west, purple (P) the east. Y's route runs north-south along lng -118.105.
+// x sits just inside P's area but right on Y's route (like a stray #31): it goes to Y.
+// z is inside P's area and more than 2 miles from Y's area: it stays with P even though Y passes nearer.
+{
+  const yArea = [[33.9, -118.4], [33.9, -118.1], [34.2, -118.1], [34.2, -118.4]], pArea = [[33.9, -118.098], [33.9, -117.8], [34.2, -117.8], [34.2, -118.098]];
+  const Y = { id: 'Y', areas: [yArea], types: [], start: { lat: 33.95, lng: -118.105 } }, P = { id: 'P', areas: [pArea], types: [], start: { lat: 34.05, lng: -117.9 } };
+  const st = [];
+  for (let i = 0; i < 8; i++) st.push({ id: 'y' + i, lat: 33.96 + i * 0.02, lng: -118.105, tags: [] });
+  for (let i = 0; i < 6; i++) st.push({ id: 'p' + i, lat: 34.0 + i * 0.02, lng: -117.9, tags: [] });
+  st.push({ id: 'x', lat: 34.05, lng: -118.097, tags: [] });
+  st.push({ id: 'z', lat: 34.05, lng: -118.05, tags: [] });
+  const r = ctx.phloAssignStops(st, [Y, P]);
+  eq([r.x.driverId, r.z.driverId, st.filter(s => /^y/.test(s.id)).every(s => r[s.id].driverId === 'Y'), st.filter(s => /^p/.test(s.id)).every(s => r[s.id].driverId === 'P')],
+    ['Y', 'P', true, true], 'stray stop goes to the route that passes it; >2 miles from an area never');
+  eq(ctx.phloAreaKm({ lat: 34.05, lng: -118.05 }, yArea) > 3.22, true, 'z is more than 2 miles from Y\'s area');
+}
+// Two drivers sharing one big area: their stops end up in two separate groups, not interleaved.
+{
+  const big = [[33.9, -118.4], [33.9, -117.8], [34.3, -117.8], [34.3, -118.4]];
+  const A = { id: 'A', areas: [big], types: [], start: { lat: 34.1, lng: -118.35 } }, B = { id: 'B', areas: [big], types: [], start: { lat: 34.1, lng: -117.85 } };
+  const st = [];
+  for (let i = 0; i < 20; i++) st.push({ id: 's' + i, lat: 34.0 + ((i * 7) % 20) / 100, lng: -118.3 + ((i * 13) % 20) * 0.025, tags: [] });
+  const r = ctx.phloAssignStops(st, [A, B]);
+  const lngs = d => st.filter(s => r[s.id].driverId === d).map(s => s.lng);
+  eq([lngs('A').length > 0, lngs('B').length > 0, Math.max(...lngs('A')) < Math.min(...lngs('B'))], [true, true, true], 'routes sharing an area do not interleave');
+}
+// A driver with no area only takes stops no area reaches.
+{
+  const area = [[34, -118.2], [34, -118], [34.1, -118], [34.1, -118.2]];
+  const r = ctx.phloAssignStops([{ id: 'in', lat: 34.05, lng: -118.1, tags: [] }, { id: 'out', lat: 34.6, lng: -118.1, tags: [] }],
+    [{ id: 'A', areas: [area], types: [], start: { lat: 34.05, lng: -118.1 } }, { id: 'N', areas: [], types: [], start: { lat: 34.05, lng: -118.1 } }]);
+  eq([r.in.driverId, r.out.driverId], ['A', 'N'], 'drivers without an area take the stops no area reaches');
+}
+// Fixed stops (already planned) stay put and are not flagged as manual.
+eq(JSON.parse(JSON.stringify(ctx.phloAssignStops([{ id: 'f', lat: 34, lng: -118, driverId: 'A', fixed: true }], [{ id: 'A', areas: [], types: [] }]))), { f: { driverId: 'A', flags: [] } }, 'fixed stops');
 // Ordering: points on a line visited in line order.
 const line = [{ lat: 34, lng: -118.3 }, { lat: 34, lng: -118.1 }, { lat: 34, lng: -118.4 }, { lat: 34, lng: -118.2 }];
 eq(ctx.phloOrderStops(line, { lat: 34, lng: -118 }, null), [1, 3, 0, 2], 'order from start');

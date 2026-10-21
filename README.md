@@ -80,7 +80,10 @@ The **Dispatch** tab turns the built master into one route per driver working th
 on the Drivers tab for the delivery date) and sends each driver their route.
 
 1. Build the master on the Master tab, then open **Dispatch** and click **Plan routes**. PHLO finds
-   every address on Google Maps, gives each stop to the driver whose coverage area it is in, then
+   every address on Google Maps and splits the stops between the drivers: a driver only gets stops
+   inside their coverage area or up to 2 miles outside it, and a stop goes to the driver whose route
+   already passes closest to it, so routes stay in one piece and don't overlap. (Drivers with no area
+   drawn only get stops no area reaches; a FRIDGE stop only goes to a driver with that type.) It then
    orders each route by real driving time from the driver's start address (and back to their end
    address, if they have one). Arrival times use the driver's hours, lunch break and speed, plus
    **Minutes per stop**. **Start time** is used for drivers without an availability start.
