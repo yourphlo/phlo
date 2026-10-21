@@ -138,6 +138,9 @@ eq(ctx.phloBulkRx(B2, '2026-10-20'), ['3000003', '3000004'], 'undo list survives
 ctx.phloMarkRx(B2, '2026-10-20', ['3000003'], null);
 eq(ctx.phloUndoMarkRest(B2, '2026-10-20'), 1, 'undo skips a ticket already unticked by hand');
 eq([B2.days['2026-10-20'].status, ctx.phloBulkRx(B2, '2026-10-20')], [{ 3000001: 'delivered', 3000002: 'missed' }, []], 'undo keeps hand ticks and not-delivered');
+// A day marked before the undo list existed: unmark puts every delivered ticket back, keeps not delivered.
+const L = ctx.phloHistoryData({ days: { '2026-10-20': { rows: [row('3000011'), row('3000012'), row('3000013')], source: 'download', status: { 3000011: 'delivered', 3000012: 'delivered', 3000013: 'missed' } } } });
+eq([ctx.phloBulkRx(L, '2026-10-20'), ctx.phloUnmarkDelivered(L, '2026-10-20'), L.days['2026-10-20'].status], [[], 2, { 3000013: 'missed' }], 'unmark an old day');
 const old = ctx.phloHistoryData({ days: { '2026-06-01': { rows: [row('2000010')], status: { 2000010: 'delivered' } }, '2026-06-02': { rows: [row('2000011')] } } });
 ctx.phloPruneHistory(old, '2026-10-21');
 eq(Object.keys(old.days), ['2026-06-02'], 'prune keeps old days with open tickets');

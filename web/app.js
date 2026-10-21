@@ -659,16 +659,21 @@
       c.missed ? el('span', { class: 'hp bad', text: c.missed + ' not delivered' }) : null,
       c.open ? el('span', { class: 'hp open', text: c.open + ' not confirmed' }) : null
     ]);
-    // Toggle: once the rest are marked (and nothing new is unconfirmed) the button undoes that.
+    // Toggle: once nothing is left unconfirmed the button undoes the marking. It puts back the tickets
+    // "Mark the rest delivered" ticked; on days marked before it remembered them, every delivered ticket.
     var bulk = phloBulkRx(hist.data, iso);
-    var undo = !c.open && bulk.length > 0;
+    var undo = !c.open && c.delivered > 0;
+    var undoCount = bulk.length || c.delivered;
     var all = el('button', { class: 'btn small-btn', type: 'button', 'aria-pressed': undo ? 'true' : 'false',
-      title: undo ? 'Put the ' + bulk.length + ' ticket' + (bulk.length === 1 ? '' : 's') + ' this marked back to not confirmed' : '',
-      text: undo ? 'Undo mark delivered (' + bulk.length + ')' : 'Mark the rest delivered' });
+      title: undo ? 'Put ' + undoCount + ' ticket' + (undoCount === 1 ? '' : 's') + ' back to not confirmed' : '',
+      text: undo ? 'Undo mark delivered (' + undoCount + ')' : 'Mark the rest delivered' });
     all.disabled = !c.open && !undo;
     all.addEventListener('click', function () {
       if (undo) {
-        phloUndoMarkRest(hist.data, iso);
+        if (bulk.length) phloUndoMarkRest(hist.data, iso);
+        else if (confirm('Put all ' + c.delivered + ' delivered ticket' + (c.delivered === 1 ? '' : 's') + ' on ' + niceDate(fromIso(iso)) +
+          ' back to not confirmed?' + (c.missed ? ' (The ' + c.missed + ' not delivered stay not delivered.)' : ''))) phloUnmarkDelivered(hist.data, iso);
+        else return;
         afterStatusChange();
         return;
       }

@@ -92,6 +92,17 @@ function phloMarkRest(hist, iso) {
   return rest.length;
 }
 
+/** Puts every delivered RX on one day back to not confirmed (not-delivered ones stay). Returns how many.
+ * Used to undo days marked before the app remembered which tickets "Mark the rest delivered" ticked. */
+function phloUnmarkDelivered(hist, iso) {
+  var day = hist.days[iso];
+  if (!day) return 0;
+  var rx = Object.keys(day.status).filter(function (n) { return day.status[n] === 'delivered'; });
+  phloMarkRx(hist, iso, rx, null);
+  day.bulk = [];
+  return rx.length;
+}
+
 /** Undo for phloMarkRest: puts the RX it ticked back to not confirmed. Returns how many. */
 function phloUndoMarkRest(hist, iso) {
   var day = hist.days[iso];
