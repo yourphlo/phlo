@@ -9,4 +9,7 @@ window.PHLO_CONFIG = {
   // Google Maps API key for address suggestions on driver profiles (README > "Google Maps addresses").
   // Safe to publish once the key is limited to your website. Leave empty to type addresses by hand.
   mapsApiKey: 'AIzaSyAgKKj2E5yMTIntVmX6ZZttIBq770rx47M',
+  // Web app URL of the PHLO dispatch script (apps-script-dispatch/README.md), ending in /exec.
+  // Needed to send routes to drivers and for driver sign-in. Leave empty to plan and print routes only.
+  dispatchUrl: '',
 };
