@@ -188,6 +188,7 @@
         <div class="actions">
           <button id="add-driver" class="btn primary">Add driver</button>
           <button id="download-drivers" class="btn" disabled>Download drivers .xlsx</button>
+          <button id="set-pins" class="btn" disabled>Give drivers PINs</button>
         </div>
       </section>
 
@@ -324,6 +325,32 @@
       <div class="actions">
         <button type="submit" id="dv-save" class="btn primary">Save</button>
         <button type="button" id="dv-cancel" class="btn ghost">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="pins-dialog" class="sheet" aria-labelledby="pins-title">
+    <form method="dialog" id="pins-form">
+      <div class="sheet-head"><h2 id="pins-title">Driver app PINs</h2><button class="del" aria-label="Close">&times;</button></div>
+      <div id="pins-choose">
+        <p class="muted small">Each driver gets a random 6-digit PIN for the driver app. You'll see the PINs once, right after,
+          to give to the drivers: they are saved scrambled and can't be shown again.</p>
+        <fieldset class="checks-col">
+          <label><input type="radio" name="who" value="missing" checked> <span id="pins-missing-label">Drivers without a PIN</span></label>
+          <label><input type="radio" name="who" value="all"> <span id="pins-all-label">Every driver (replaces their current PIN)</span></label>
+        </fieldset>
+        <div class="actions"><button type="button" id="pins-make" class="btn primary">Make PINs</button></div>
+      </div>
+      <div id="pins-result" hidden>
+        <p class="muted small">Give each driver their name and PIN. They sign in on the PHLO page with <b>Driver sign-in</b>.
+          These PINs won't be shown again: copy or print them now.</p>
+        <table class="pins-table"><thead><tr><th>Driver</th><th>Name to sign in</th><th>PIN</th></tr></thead><tbody id="pins-rows"></tbody></table>
+        <ul id="pins-warn" class="form-errors" hidden></ul>
+        <div class="actions">
+          <button type="button" id="pins-copy" class="btn primary">Copy</button>
+          <button type="button" id="pins-print" class="btn">Print</button>
+          <button class="btn ghost">Done</button>
+        </div>
       </div>
     </form>
   </dialog>
