@@ -238,43 +238,37 @@
   function renderPasteBoxes() {
     var list = $('paste-list');
     STORES.filter(function (s) { return s.paste; }).forEach(function (store) {
-      var date = el('input', { type: 'date', 'aria-label': store.code + ' pickup day' });
       var count = el('span', { class: 'pill' });
       var text = el('textarea', { class: 'paste-text', spellcheck: 'false', autocomplete: 'off', wrap: 'off',
         'aria-label': 'Cells pasted from the ' + store.code + ' sheet', placeholder: 'Paste ' + store.code + ' cells here' });
       var clear = el('button', { class: 'btn ghost', type: 'button', text: 'Clear' });
       var update = function () {
-        var n = phloParsePasted(text.value).filter(function (r) { return /\d{5,}/.test(r.join(' ')); }).length;
+        var n = text.value.trim() ? phloPasted(text.value, store, todayLocal()).rx : 0;
         count.textContent = text.value.trim() ? n + ' row' + (n === 1 ? '' : 's') + ' with an RX number' : '';
       };
       text.addEventListener('input', update);
       clear.addEventListener('click', function () { text.value = ''; update(); text.focus(); });
       list.appendChild(el('div', { class: 'paste-store' }, [
-        el('div', { class: 'paste-head' }, [
-          el('span', { class: 'code', text: store.code }),
-          el('label', { class: 'field' }, ['Pickup day', date]),
-          count, clear
-        ]),
+        el('div', { class: 'paste-head' }, [el('span', { class: 'code', text: store.code }), count, clear]),
         text
       ]));
-      pasteBoxes[store.code] = { date: date, text: text };
+      pasteBoxes[store.code] = text;
     });
     $('paste-card').hidden = !Object.keys(pasteBoxes).length;
-  }
-
-  /** Pickup day follows the delivery date: the day before (Sunday for a Monday delivery). */
-  function resetPasteDates() {
-    if (!$('date').value) return;
-    var pickup = phloPickupDates(fromIso($('date').value))[0];
-    Object.keys(pasteBoxes).forEach(function (k) { pasteBoxes[k].date.value = isoDate(pickup); });
   }
 
   /** The store's pasted cells as a readStore() result, or null when its box is empty. */
   function pasted(store, delivery) {
     var box = pasteBoxes[store.code];
-    if (!box || !box.text.value.trim()) return null;
-    var pickup = box.date.value ? fromIso(box.date.value) : phloPickupDates(delivery)[0];
-    return Promise.resolve({ values: phloPastedValues(box.text.value, pickup, delivery), file: {}, tabs: ['pasted cells'] });
+    if (!box || !box.value.trim()) return null;
+    var p = phloPasted(box.value, store, delivery);
+    var col = String.fromCharCode(65 + p.rxCol);
+    p.file = {};
+    p.tabs = ['pasted cells' + (p.rx ? ', RX numbers in column ' + col : '')];
+    p.note = !p.rx ? 'no RX numbers found in the ' + p.lines + ' pasted line' + (p.lines === 1 ? '' : 's') :
+      p.rx + ' pasted row' + (p.rx === 1 ? '' : 's') + ' with an RX number, but none had a name in column ' +
+      String.fromCharCode(65 + p.store.cols.name) + ', or every note gives another delivery date';
+    return Promise.resolve(p);
   }
 
   /* ---------------- build ---------------- */
@@ -302,7 +296,7 @@
           status.className = 'status warn'; status.textContent = 'no file found';
           return { store: store, rows: [], problem: 'No sheet found in Drive' };
         }
-        var rows = phloStoreRows(r.values, store, delivery);
+        var rows = phloStoreRows(r.values, r.store || store, delivery);
         status.className = 'status ' + (rows.length ? 'ok' : 'warn');
         status.textContent = rows.length + ' row' + (rows.length === 1 ? '' : 's');
         meta.textContent = [relTime(r.file.modifiedTime), r.tabs.join(', ') || r.note].filter(Boolean).join(' · ');
@@ -783,8 +777,7 @@
     $('date').value = isoDate(phloAddDays(todayLocal(), 1));
     updateWindowNote();
     renderPasteBoxes();
-    resetPasteDates();
-    $('date').addEventListener('change', function () { updateWindowNote(); resetPasteDates(); });
+    $('date').addEventListener('change', updateWindowNote);
     $('signin').addEventListener('click', function () { signIn(); });
     $('signin-main').addEventListener('click', function () { signIn(); });
     $('signout').addEventListener('click', signOut);

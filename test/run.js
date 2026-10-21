@@ -68,18 +68,28 @@ eq(ctx.phloStoreRows([
 eq(ctx.phloParsePasted('A\tB\r\n"line 1\nline 2"\t"say ""hi"""\r\n\t\r\n'), [['A', 'B'], ['line 1\nline 2', 'say "hi"']], 'paste parse');
 const bpStore = ctx.STORES.find(s => s.code === 'BP');
 const bpPaste = [
+  'BP PHLO PICK UP ON 10/15/2026',
   'TIME\tSTORE\tRX #\tPATIENT\t\t\t\tNOTES\tCOPAY',
   '9AM\tBP\t1000031\t"PAT,ONE\n10 A ST TOWN CA 91000"\t\t\t\tgate code 12\t$4.50',
   'Sat 10/17/26',
   '\t\t1000032\tPAT,TWO, 20 B ST TOWN CA 91000\t\t\t\t\t',
-  'Fri 10/16/26',
-  '\t\t1000033\tOLD,ROW, 30 C ST TOWN CA 91000\t\t\t\t\t',
 ].join('\n');
 const monday = ctx.phloUtc(2026, 10, 19);
-eq(ctx.phloStoreRows(ctx.phloPastedValues(bpPaste, ctx.phloUtc(2026, 10, 18), monday), bpStore, monday), [
+const bpWant = [
   ['1000031,PAT,ONE', '10 A ST TOWN CA 91000', 'BP', '$4.50-gate code 12'],
   ['1000032,PAT,TWO', '20 B ST TOWN CA 91000', 'BP', ''],
-], 'BP pasted cells');
+];
+let p = ctx.phloPasted(bpPaste, bpStore, monday);
+eq([p.rx, p.rxCol], [2, 2], 'BP paste: RX column C');
+eq(ctx.phloStoreRows(p.values, p.store, monday), bpWant, 'BP pasted cells (stray dates ignored)');
+// Copied from column B instead of A: everything shifts one column left.
+p = ctx.phloPasted([
+  'BP\t1000031\t"PAT,ONE\n10 A ST TOWN CA 91000"\t\t\t\tgate code 12\t$4.50',
+  '\t1000032\tPAT,TWO, 20 B ST TOWN CA 91000\t\t\t\t\t',
+].join('\n'), bpStore, monday);
+eq(p.rxCol, 1, 'BP paste from column B');
+eq(ctx.phloStoreRows(p.values, p.store, monday), bpWant, 'BP pasted from column B');
+eq(ctx.phloPasted('just\ttext\nno numbers', bpStore, monday).rx, 0, 'paste without RX numbers');
 
 const checks = ctx.phloCheckRows([
   ['1000010, 1000011,V 1000012, A,B, & C,D', '600 BIRCH AVE APT 5 TOWN CA 91000', 'EM', ''],

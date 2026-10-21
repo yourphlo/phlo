@@ -20,10 +20,10 @@ Two ways to run it (same logic, same results):
 2. Pick the **delivery date** (defaults to tomorrow) and click **Build master**.
    **BP from Outlook:** if BP's sheet isn't in your Google Drive, open it from Outlook, select the
    rows on its day tab (Ctrl+A), copy, and paste into the **BP** box under **Paste cells** before
-   clicking Build master. The pasted rows go on the **Pickup day** shown (the day before delivery).
-   For a Monday delivery, also type Saturday's date (e.g. `Sat 10/17/26`) on its own line and paste
-   Saturday's rows under it. A full box replaces the Google Drive search for BP; leave it empty to
-   use Drive as before. Pasted cells are never saved and disappear when you sign out or reload.
+   clicking Build master. Every pasted row goes on this delivery, so paste just the day(s) you want
+   (Saturday's and Sunday's tabs for a Monday). The app finds the RX number column by itself, so the
+   copy doesn't have to start at column A. A full box replaces the Google Drive search for BP; leave it
+   empty to use Drive as before. Pasted cells are never saved and disappear when you sign out or reload.
 3. Each store shows how many rows it gave and when its sheet was last updated. A store with
    0 rows or "no file found" probably hasn't entered its list yet.
 4. Go through **Check before uploading**: missing RX numbers, stray letters in RX numbers,
