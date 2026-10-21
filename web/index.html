@@ -20,15 +20,15 @@
     <div class="account">
       <span id="who" class="muted"></span>
       <button id="driver-signout" class="btn ghost" hidden>Sign out</button>
-      <button id="signin" class="btn">Sign in with Google</button>
+      <button id="signin" class="btn">Admin sign-in</button>
       <button id="signout" class="btn ghost" hidden>Sign out</button>
     </div>
   </header>
 
   <nav id="tabs" class="tabs" aria-label="Sections" hidden>
     <button class="tab" data-view="master" aria-current="page">Master</button>
-    <button class="tab" data-view="dispatch">Dispatch</button>
     <button class="tab" data-view="drivers">Drivers <span id="drivers-tab-count" class="pill"></span></button>
+    <button class="tab" data-view="dispatch">Dispatch</button>
   </nav>
 
   <main>
@@ -44,8 +44,8 @@
 
     <section id="locked" class="card locked">
       <h2>Sign in to use PHLO</h2>
-      <p class="muted">Only the PHLO Google account can open the master and driver pages.</p>
-      <button id="signin-main" class="btn primary">Sign in with Google</button>
+      <p class="muted">Admin sign-in is for the PHLO office account only. Drivers sign in below with their name and PIN.</p>
+      <button id="signin-main" class="btn primary">Admin sign-in</button>
       <form id="driver-login" class="driver-login" hidden novalidate>
         <h3>Drivers</h3>
         <p class="muted small">Sign in with your name and the PIN the office gave you.</p>
