@@ -26,6 +26,10 @@ function phloHistoryDay(raw) {
     source: PHLO_SOURCE_RANK[raw.source] !== undefined ? raw.source : 'built',
     savedAt: raw.savedAt || '',
     status: status,
+    // RX numbers "Mark the rest delivered" ticked, so it can be undone. Only those still delivered count.
+    bulk: (Array.isArray(raw.bulk) ? raw.bulk : []).map(String).filter(function (rx, i, a) {
+      return status[rx] === 'delivered' && a.indexOf(rx) === i;
+    }),
     routific: raw.routific && typeof raw.routific === 'object' ? raw.routific : null
   };
 }
@@ -55,7 +59,7 @@ function phloDayRx(day) {
 function phloSaveDay(hist, iso, rows, source, nowIso) {
   var old = hist.days[iso];
   if (old && old.rows.length && PHLO_SOURCE_RANK[source] < PHLO_SOURCE_RANK[old.source]) return false;
-  var day = phloHistoryDay({ rows: rows, source: source, savedAt: nowIso, status: old ? old.status : {}, routific: old ? old.routific : null });
+  var day = phloHistoryDay({ rows: rows, source: source, savedAt: nowIso, status: old ? old.status : {}, bulk: old ? old.bulk : [], routific: old ? old.routific : null });
   if (old && JSON.stringify(old.rows) === JSON.stringify(day.rows) && old.source === day.source) return false;
   hist.days[iso] = day;
   // A Routific stops export dropped earlier still applies to the new rows.
@@ -70,6 +74,32 @@ function phloMarkRx(hist, iso, rxList, status) {
   rxList.forEach(function (rx) {
     if (status) day.status[rx] = status; else delete day.status[rx];
   });
+}
+
+/** RX numbers "Mark the rest delivered" ticked on one day that are still delivered (what Undo would clear). */
+function phloBulkRx(hist, iso) {
+  var day = hist.days[iso];
+  return day ? (day.bulk || []).filter(function (rx) { return day.status[rx] === 'delivered'; }) : [];
+}
+
+/** "Mark the rest delivered": every unconfirmed RX on the day becomes delivered. Returns how many. */
+function phloMarkRest(hist, iso) {
+  var day = hist.days[iso];
+  if (!day) return 0;
+  var rest = phloDayRx(day).filter(function (rx) { return !day.status[rx]; });
+  phloMarkRx(hist, iso, rest, 'delivered');
+  day.bulk = phloBulkRx(hist, iso).concat(rest);
+  return rest.length;
+}
+
+/** Undo for phloMarkRest: puts the RX it ticked back to not confirmed. Returns how many. */
+function phloUndoMarkRest(hist, iso) {
+  var day = hist.days[iso];
+  if (!day) return 0;
+  var rx = phloBulkRx(hist, iso);
+  phloMarkRx(hist, iso, rx, null);
+  day.bulk = [];
+  return rx.length;
 }
 
 /**
@@ -157,6 +187,7 @@ function phloMergeHistory(a, b) {
     var day = phloHistoryDay(newer);
     Object.keys(older.status).forEach(function (n) { if (!day.status[n]) day.status[n] = older.status[n]; });
     if (!day.routific) day.routific = older.routific;
+    day.bulk = phloHistoryDay({ status: day.status, bulk: day.bulk.concat(older.bulk || []) }).bulk;
     out.days[iso] = day;
   });
   return out;

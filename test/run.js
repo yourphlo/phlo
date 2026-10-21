@@ -126,6 +126,18 @@ eq(ctx.phloOutstanding(H, '2026-10-20', []).length, 0, 'only days before the bui
 ctx.phloMarkRx(H, '2026-10-19', ['2000005'], null);
 eq(ctx.phloOutstanding(H, '2026-10-21', [row('2000007'), row('2000001')]).map(o => [o.rx, o.row[0]]), [[['2000005'], '2000004, 2000005,PAT,ONE']], 'combo row carried for its open RX');
 eq(ctx.phloDayCounts(H.days['2026-10-20']), { total: 3, delivered: 1, missed: 1, open: 1 }, 'day counts');
+// Mark the rest delivered, then undo: only the tickets it marked go back to not confirmed.
+const B = ctx.phloHistoryData(null);
+ctx.phloSaveDay(B, '2026-10-20', [row('3000001'), row('3000002'), row('3000003'), row('3000004')], 'download', 't');
+ctx.phloMarkRx(B, '2026-10-20', ['3000001'], 'delivered');
+ctx.phloMarkRx(B, '2026-10-20', ['3000002'], 'missed');
+eq(ctx.phloMarkRest(B, '2026-10-20'), 2, 'mark rest count');
+eq(ctx.phloBulkRx(B, '2026-10-20'), ['3000003', '3000004'], 'mark rest remembers what it marked');
+const B2 = ctx.phloHistoryData(JSON.parse(JSON.stringify(B)));
+eq(ctx.phloBulkRx(B2, '2026-10-20'), ['3000003', '3000004'], 'undo list survives saving to Google');
+ctx.phloMarkRx(B2, '2026-10-20', ['3000003'], null);
+eq(ctx.phloUndoMarkRest(B2, '2026-10-20'), 1, 'undo skips a ticket already unticked by hand');
+eq([B2.days['2026-10-20'].status, ctx.phloBulkRx(B2, '2026-10-20')], [{ 3000001: 'delivered', 3000002: 'missed' }, []], 'undo keeps hand ticks and not-delivered');
 const old = ctx.phloHistoryData({ days: { '2026-06-01': { rows: [row('2000010')], status: { 2000010: 'delivered' } }, '2026-06-02': { rows: [row('2000011')] } } });
 ctx.phloPruneHistory(old, '2026-10-21');
 eq(Object.keys(old.days), ['2026-06-02'], 'prune keeps old days with open tickets');
