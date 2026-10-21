@@ -17,13 +17,12 @@
   var dmap = { map: null, loading: null, markers: [], lines: [], areas: [], info: null, ov: null, tool: 'move', sel: {}, lasso: null };
   var live = { timer: null, busy: false };
 
+  // Check before sending lists address problems only; who takes which stop is checked by hand.
   var FLAG_TEXT = {
     notFound: 'Address not found on Google Maps',
-    partial: 'Google only found part of this address',
-    outside: 'Not in any working driver\'s area',
-    overlap: 'In more than one driver\'s area',
-    type: 'No working driver has its type'
+    partial: 'Google only found part of this address'
   };
+  function addressFlags(flags) { return flags.filter(function (f) { return FLAG_TEXT[f]; }); }
 
   /* ---------------- setup + summary ---------------- */
 
@@ -187,8 +186,8 @@
         var src = d.src;
         d.startPt = src.startPin ? { lat: src.startPin.lat, lng: src.startPin.lng } : null;
         d.endPt = src.endPin ? { lat: src.endPin.lat, lng: src.endPin.lng } : null;
-        if (!d.startPt && src.startAddress) lookups.push(function () { return geocode(g, src.startAddress).then(function (r) { if (!r.none) d.startPt = { lat: r.lat, lng: r.lng }; else plan.problems.push(d.name + '\'s start address was not found on Google Maps.'); }); });
-        if (!d.endPt && src.endAddress) lookups.push(function () { return geocode(g, src.endAddress).then(function (r) { if (!r.none) d.endPt = { lat: r.lat, lng: r.lng }; }); });
+        if (!d.startPt && src.startAddress) lookups.push(function () { return geocode(g, src.startAddress).then(function (r) { if (!r.none) d.startPt = { lat: r.lat, lng: r.lng }; else plan.problems.push(d.name + '\'s start address was not found on Google Maps, so the route starts at the first stop. Fix it on the Drivers tab.'); }); });
+        if (!d.endPt && src.endAddress) lookups.push(function () { return geocode(g, src.endAddress).then(function (r) { if (!r.none) d.endPt = { lat: r.lat, lng: r.lng }; else plan.problems.push(d.name + '\'s end address was not found on Google Maps, so the route ends at the last stop. Fix it on the Drivers tab.'); }); });
       });
       stops.forEach(function (s) {
         lookups.push(function () {
@@ -226,7 +225,7 @@
       var r = res[s.id];
       s.driverId = r.driverId;
       s.manual = r.flags.indexOf('manual') >= 0;
-      s.flags = r.flags.filter(function (f) { return f !== 'manual'; });
+      s.flags = addressFlags(r.flags);
       if (s.partial && s.flags.indexOf('notFound') < 0) s.flags.push('partial');
     });
   }
@@ -253,7 +252,7 @@
       if (stop.driverId) changed[stop.driverId] = true;
       stop.driverId = driverId;
       stop.manual = !!driverId;
-      stop.flags = stop.flags.filter(function (f) { return f === 'notFound' || f === 'partial'; });
+      stop.flags = addressFlags(stop.flags);
       moved++;
     });
     if (!moved) { toast(driverId ? 'Those stops are already with ' + driverName(driverId) + '.' : 'Those stops are already off the routes.'); return Promise.resolve(); }
@@ -277,7 +276,7 @@
       var res = phloAssignStops([{ id: stop.id, lat: r.lat, lng: r.lng, tags: stop.tags, driverId: stop.manual ? stop.driverId : null }],
         plan.drivers.map(function (d) { return { id: d.id, areas: d.src.areas, types: d.src.types, capacity: d.src.capacity, start: d.startPt }; }))[stop.id];
       stop.driverId = res.driverId;
-      stop.flags = res.flags.filter(function (f) { return f !== 'manual'; });
+      stop.flags = addressFlags(res.flags);
       if (r.partial) stop.flags.push('partial');
       var d = plan.drivers.filter(function (x) { return x.id === stop.driverId; })[0];
       return (d ? routeDriver(d) : Promise.resolve()).then(afterPlan);
@@ -311,36 +310,31 @@
     plan.problems.forEach(function (p) { items.push({ level: 'error', text: p }); });
     plan.stops.forEach(function (s) {
       s.flags.forEach(function (f) {
-        var extra = f === 'overlap' || f === 'outside' || f === 'type' ? ' → given to ' + driverName(s.driverId) : f === 'partial' ? ' (found: ' + (s.formatted || '?') + ')' : '';
+        var extra = f === 'partial' ? ' (found: ' + (s.formatted || '?') + ')' : '';
         items.push({ level: f === 'notFound' ? 'error' : 'warn', stop: s, flag: f, text: FLAG_TEXT[f] + extra });
       });
-    });
-    plan.drivers.forEach(function (d) {
-      var r = plan.routes[d.id], n = r.stopIds.length;
-      if (typeof d.src.capacity === 'number' && n > d.src.capacity) items.push({ level: 'warn', text: d.name + ' has ' + n + ' stops but a capacity of ' + d.src.capacity + '.' });
-      if (r.schedule && r.schedule.late.length) items.push({ level: 'warn', text: d.name + ' reaches ' + r.schedule.late.length + ' stop' + (r.schedule.late.length === 1 ? '' : 's') + ' after ' + phloClock(d.src.availableTo) + ' (finishes ' + phloClock(r.schedule.finish) + ').' });
-      if (!d.startPt) items.push({ level: 'error', text: d.name + ' has no start point, so the route starts at the first stop.' });
     });
     items.forEach(function (it) {
       var li = el('li', { class: it.level + ' wrap' }, [
         el('span', { class: 'where', text: it.stop ? it.stop.name : '' }),
         el('span', { text: it.text })
       ]);
-      if (it.stop && it.flag === 'notFound') {
+      if (it.stop) {
         var input = el('input', { value: it.stop.address, 'aria-label': 'Address for ' + it.stop.name });
         var btn = el('button', { class: 'btn', type: 'button', text: 'Find' });
         btn.addEventListener('click', function (e) { e.stopPropagation(); retryAddress(it.stop, input.value.trim()); });
         input.addEventListener('click', function (e) { e.stopPropagation(); });
         input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); retryAddress(it.stop, input.value.trim()); } });
         li.appendChild(el('div', { class: 'dp-fix' }, [input, btn]));
-      } else if (it.stop) {
-        li.tabIndex = 0;
-        li.addEventListener('click', function () { focusStop(it.stop); });
-        li.addEventListener('keydown', function (e) { if (e.key === 'Enter') focusStop(it.stop); });
+        if (it.stop.lat != null) {
+          li.tabIndex = 0;
+          li.addEventListener('click', function () { focusStop(it.stop); });
+          li.addEventListener('keydown', function (e) { if (e.key === 'Enter' && e.target === li) focusStop(it.stop); });
+        }
       }
       list.appendChild(li);
     });
-    if (!items.length) list.appendChild(el('li', { class: 'empty', text: 'Every stop has a clear driver.' }));
+    if (!items.length) list.appendChild(el('li', { class: 'empty', text: 'Every address was found on Google Maps.' }));
     $('dp-flags-count').textContent = items.length ? String(items.length) : '';
     $('dp-flags-card').hidden = false;
   }
@@ -650,7 +644,7 @@
     var flagged = plan.stops.filter(function (s) { return s.flags.length; }).length;
     var off = plan.stops.filter(function (s) { return !s.driverId; }).length;
     var msg = 'Send ' + plan.drivers.filter(function (d) { return plan.routes[d.id].stopIds.length; }).length + ' routes for ' + A.niceDate(A.fromIso(plan.iso)) + ' to the drivers?';
-    if (flagged) msg += '\n\n' + flagged + ' stop' + (flagged === 1 ? ' is' : 's are') + ' still flagged in "Check before sending".';
+    if (flagged) msg += '\n\n' + flagged + ' stop' + (flagged === 1 ? ' still has an address problem' : 's still have address problems') + ' in "Check before sending".';
     if (off) msg += '\n' + off + ' stop' + (off === 1 ? ' is' : 's are') + ' not on any route and will not be sent.';
     msg += '\n\nSending again later replaces these routes; what drivers already recorded is kept.';
     if (!confirm(msg)) return;

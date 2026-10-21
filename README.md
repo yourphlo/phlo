@@ -84,10 +84,11 @@ on the Drivers tab for the delivery date) and sends each driver their route.
    orders each route by real driving time from the driver's start address (and back to their end
    address, if they have one). Arrival times use the driver's hours, lunch break and speed, plus
    **Minutes per stop**. **Start time** is used for drivers without an availability start.
-2. **Check before sending** lists what needs a look: addresses Google can't find (fix the address and
-   click **Find**), stops in two drivers' areas or in nobody's area (PHLO picked the nearest driver),
-   stops with a type (e.g. `FRIDGE`) no working driver has, drivers over capacity and stops reached
-   after a driver's hours. Click one to see it on the map.
+2. **Check before sending** lists address problems only: stop addresses Google can't find or only
+   found part of (fix the address and click **Find**), and driver start or end addresses it can't
+   find (fix those on the Drivers tab). Click a stop to see it on the map. Whether each driver's
+   route fits them is up to you: a stop in two drivers' areas or in nobody's area goes to the nearest
+   driver, and each route's heading shows when it is over capacity or runs past the driver's hours.
 3. To move a stop, pick another driver in its **Driver** list (in the route list or by clicking it on
    the map). Both routes are re-planned.
    To move many at once, click **Select stops** above the map, draw a loop around the stops (or tap

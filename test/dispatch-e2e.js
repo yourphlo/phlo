@@ -137,7 +137,7 @@ async function setup(page, errors) {
   await office.waitForSelector('#dp-routes-card:not([hidden])');
   const flags = await office.$$eval('#dp-flags li', l => l.map(x => x.textContent));
   check(flags.some(t => t.includes('NOE,CY') && t.includes('not found')), 'flag: address not found');
-  check(flags.some(t => t.includes('KAY,BO') && t.includes('more than one')), 'flag: overlap');
+  check(flags.length === 1, 'Check before sending lists only address problems (overlaps are not flagged): ' + JSON.stringify(flags));
   const sums = await office.$$eval('.dp-route summary', l => l.map(x => x.textContent));
   console.log('     routes:', sums);
   check(sums[0].includes('Ana Ruiz') && sums[0].includes('3 stops') && sums[0].includes('8:00 AM'), 'Ana gets the west stops + overlap, starts 8:00');
