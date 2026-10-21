@@ -26,6 +26,27 @@ Two ways to run it (same logic, same results):
 6. Optional: drop your hand-edited upload file into **Check a finished file** to see any RX
    number missing from it, any that isn't in the store sheets, and typos.
 
+### Past deliveries (tickets carried over)
+
+The **Past deliveries** panel keeps every master's ticket (RX) numbers by delivery date, saved to
+your Google account like the driver profiles. Any ticket that is not confirmed delivered goes back
+on the next master, however old it is, until someone confirms it.
+
+- **Build master** also rebuilds the past 4 delivery days (Sundays skipped) from the store sheets
+  and saves them, so tickets from earlier days are tracked even before you start downloading.
+  A master you downloaded or checked in **Check a finished file** is kept instead of the rebuild.
+- Tickets carried over are added to the master, under their store, highlighted with
+  "from 10/20". The checks list says when each one was first on a master.
+- To take a ticket off, confirm it was delivered:
+  - drop the **Routific stops export** for that day (the date comes from the file name, e.g.
+    `... - 2026-10-20.csv`). Delivered stops are marked delivered; failed or unscheduled stops
+    are marked not delivered and stay on the master. If the file has no status column, every
+    routed stop counts as delivered.
+  - or click **Mark the rest delivered** for a day, or tick single tickets under **Tickets**.
+- A **Routific summary** (Driver Name, Time, Distance, Number of Stops) has no ticket numbers.
+  It is saved with the day and the panel compares its stop count with the master and flags
+  unscheduled stops, but it cannot say which tickets were delivered.
+
 ### Drivers
 
 The **Drivers** tab keeps a profile for each driver: name and start address (required), end
