@@ -78,7 +78,9 @@ function phloNormalizeDriver(d) {
     types: phloParseTypes(d.types),
     speed: DRIVER_SPEEDS.some(function (s) { return s.value === speed; }) ? speed : 'NORMAL',
     lunchFrom: time(d.lunchFrom),
-    lunchTo: time(d.lunchTo)
+    lunchTo: time(d.lunchTo),
+    areas: phloNormalizeAreas(d.areas),
+    color: /^#[0-9a-f]{6}$/i.test(d.color || '') ? d.color.toLowerCase() : ''
   };
 }
 
@@ -149,5 +151,94 @@ function phloDriversData(raw) {
     updatedAt: raw.updatedAt || '',
     drivers: (Array.isArray(raw.drivers) ? raw.drivers : []).map(phloNormalizeDriver),
     roster: roster
+  };
+}
+
+/* ---------- coverage areas (drawn on the Drivers map) ---------- */
+
+// Area colours, one per driver. Picked to stand apart on a Google road map.
+var AREA_COLORS = ['#d1495b', '#2b7bba', '#2a9d5c', '#e08a1e', '#7b4fb8', '#c2477f', '#178f8f', '#8a6d3b', '#4f6bd8', '#b5452a'];
+var MAX_AREAS = 50;        // per driver
+var MAX_AREA_POINTS = 500; // per area
+
+/** Tidies a driver's drawn areas: a list of outlines, each [[lat, lng], ...] with at least 3 points.
+ * Coordinates are rounded to 5 decimals (about 1 m); bad points and tiny outlines are dropped. */
+function phloNormalizeAreas(areas) {
+  if (!Array.isArray(areas)) return [];
+  var out = [];
+  areas.forEach(function (ring) {
+    if (!Array.isArray(ring) || out.length >= MAX_AREAS) return;
+    var pts = [];
+    ring.forEach(function (p) {
+      if (!Array.isArray(p)) return;
+      var lat = +p[0], lng = +p[1];
+      if (p[0] === '' || p[1] === '' || p[0] == null || p[1] == null) return;
+      if (!isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return;
+      var q = [Math.round(lat * 1e5) / 1e5, Math.round(lng * 1e5) / 1e5];
+      var last = pts[pts.length - 1];
+      if (!last || last[0] !== q[0] || last[1] !== q[1]) pts.push(q);
+    });
+    // A closed outline repeats its first point at the end; keep it open.
+    if (pts.length > 1 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) pts.pop();
+    if (pts.length >= 3) out.push(pts.slice(0, MAX_AREA_POINTS));
+  });
+  return out;
+}
+
+/** Thins a hand-drawn line [[x, y], ...] (screen pixels) to the points that matter (Douglas-Peucker):
+ * no kept line strays more than `tolerance` from the drawn one. */
+function phloSimplifyPath(points, tolerance) {
+  if (!points || points.length < 3) return (points || []).slice();
+  var tol2 = tolerance * tolerance;
+  var keep = new Array(points.length);
+  keep[0] = keep[points.length - 1] = true;
+  var stack = [[0, points.length - 1]];
+  while (stack.length) {
+    var seg = stack.pop(), a = points[seg[0]], b = points[seg[1]];
+    var dx = b[0] - a[0], dy = b[1] - a[1], len2 = dx * dx + dy * dy;
+    var worst = -1, worstD = tol2;
+    for (var i = seg[0] + 1; i < seg[1]; i++) {
+      var p = points[i], t = len2 ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      var ex = a[0] + t * dx - p[0], ey = a[1] + t * dy - p[1], d = ex * ex + ey * ey;
+      if (d > worstD) { worstD = d; worst = i; }
+    }
+    if (worst > 0) { keep[worst] = true; stack.push([seg[0], worst], [worst, seg[1]]); }
+  }
+  return points.filter(function (p, i) { return keep[i]; });
+}
+
+/** Colour for each driver ({id: '#rrggbb'}): its saved colour, else the next colour no one has yet. */
+function phloDriverColors(drivers) {
+  var used = {}, out = {}, next = 0;
+  drivers.forEach(function (d) { if (d.color) { used[d.color.toLowerCase()] = true; out[d.id] = d.color; } });
+  var free = AREA_COLORS.filter(function (c) { return !used[c]; });
+  drivers.forEach(function (d) {
+    if (out[d.id]) return;
+    out[d.id] = free.length ? free[next % free.length] : AREA_COLORS[next % AREA_COLORS.length];
+    next++;
+  });
+  return out;
+}
+
+/** The drawn areas as GeoJSON (opens in geojson.io, QGIS, etc.): one feature per driver with areas. */
+function phloAreasGeoJson(drivers) {
+  var colors = phloDriverColors(drivers);
+  return {
+    type: 'FeatureCollection',
+    features: drivers.filter(function (d) { return d.areas && d.areas.length; }).map(function (d) {
+      return {
+        type: 'Feature',
+        properties: { driver: d.name, color: colors[d.id], areas: d.areas.length, startAddress: d.startAddress },
+        geometry: {
+          type: 'MultiPolygon',
+          coordinates: d.areas.map(function (ring) {
+            var c = ring.map(function (p) { return [p[1], p[0]]; });
+            c.push(c[0]);
+            return [c];
+          })
+        }
+      };
+    })
   };
 }
