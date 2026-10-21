@@ -305,6 +305,9 @@ body.driver-mode #signin, body.driver-mode #signout, body.driver-mode #tabs, bod
 img.sig { object-fit: contain; }
 .img-sheet img { max-width: 100%; border-radius: 8px; background: #fff; }
 
+.pins-table { margin: 4px 0; }
+.pins-table td:last-child { font: 600 16px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 2px; }
+
 /* printed route sheets: only the print area prints */
 .print-area { display: none; }
 @media print {

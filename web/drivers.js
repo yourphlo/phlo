@@ -42,6 +42,19 @@ function phloParseTime(v) {
 /** "Ana Maria Ruiz" -> "ana": a sign-in name for the driver app (lowercase letters and digits). */
 function phloUsername(v) { return phloCleanText(v).split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, ''); }
 
+/** A 6-digit PIN from random numbers (e.g. crypto.getRandomValues(new Uint32Array(6))).
+ * Skips PINs that are easy to guess: all one digit, or counting up or down (123456, 654321). */
+function phloRandomPin(rand) {
+  var pin = Array.prototype.map.call(rand, function (n) { return String(n % 10); }).join('').slice(0, 6);
+  var d = pin.split('').map(Number), same = true, up = true, down = true;
+  for (var i = 1; i < d.length; i++) {
+    if (d[i] !== d[0]) same = false;
+    if (d[i] !== (d[i - 1] + 1) % 10) up = false;
+    if (d[i] !== (d[i - 1] + 9) % 10) down = false;
+  }
+  return same || up || down ? null : pin;
+}
+
 /** The name a driver signs in to the driver app with: their own username, else their first name. */
 function phloLoginName(d) { return d.username || phloUsername(d.name); }
 

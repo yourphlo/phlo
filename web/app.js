@@ -636,6 +636,7 @@
     $('roster-count').textContent = data.drivers.length ? label : '';
     $('drivers-tab-count').textContent = data.drivers.length ? String(data.drivers.length) : '';
     $('download-drivers').disabled = !working.length;
+    $('set-pins').disabled = !data.drivers.length;
     renderSyncNote();
     renderCoverage();
     document.dispatchEvent(new CustomEvent('phlo:drivers'));
@@ -789,6 +790,80 @@
     closeDriverForm();
     commitDrivers();
     toast((isNew ? 'Added ' : 'Saved ') + d.name);
+  }
+
+  /* ---------------- random app PINs ---------------- */
+
+  function openPins() {
+    var all = drv.data.drivers, missing = all.filter(function (d) { return !d.pinHash; });
+    $('pins-missing-label').textContent = 'Drivers without a PIN (' + missing.length + ')';
+    $('pins-all-label').textContent = 'Every driver (' + all.length + '; replaces current PINs)';
+    var f = $('pins-form');
+    f.elements.who.value = missing.length ? 'missing' : 'all';
+    f.elements.who[0].disabled = !missing.length;
+    $('pins-choose').hidden = false;
+    $('pins-result').hidden = true;
+    $('pins-dialog').showModal();
+  }
+
+  function newPin() {
+    for (;;) { var p = phloRandomPin(crypto.getRandomValues(new Uint32Array(6))); if (p) return p; }
+  }
+
+  function makePins() {
+    var who = $('pins-form').elements.who.value;
+    var list = drv.data.drivers.filter(function (d) { return who === 'all' || !d.pinHash; })
+      .sort(function (a, b) { return a.name.localeCompare(b.name); });
+    if (!list.length) return;
+    $('pins-make').disabled = true;
+    var made = list.map(function (d) {
+      var salt = Array.prototype.map.call(crypto.getRandomValues(new Uint8Array(8)), function (b) { return (b < 16 ? '0' : '') + b.toString(16); }).join('');
+      var pin = newPin();
+      return hashPin(salt, pin).then(function (h) { return { d: d, salt: salt, hash: h, pin: pin }; });
+    });
+    Promise.all(made).then(function (res) {
+      res.forEach(function (r) { r.d.pinSalt = r.salt; r.d.pinHash = r.hash; });
+      commitDrivers();
+      var tb = $('pins-rows');
+      tb.textContent = '';
+      res.forEach(function (r) {
+        tb.appendChild(el('tr', {}, [el('td', { text: r.d.name }), el('td', { text: phloLoginName(r.d) }), el('td', { text: r.pin })]));
+      });
+      // Two drivers signing in with the same name can't both use the app.
+      var seen = {}, warn = [];
+      drv.data.drivers.forEach(function (d) {
+        var n = phloLoginName(d);
+        if (seen[n]) warn.push(seen[n] + ' and ' + d.name + ' both sign in as "' + n + '": give one of them another App username on the Drivers tab.');
+        seen[n] = d.name;
+      });
+      var box = $('pins-warn');
+      box.textContent = '';
+      warn.forEach(function (w) { box.appendChild(el('li', { text: w })); });
+      box.hidden = !warn.length;
+      $('pins-dialog').pinsText = res.map(function (r) { return r.d.name + ': sign in as "' + phloLoginName(r.d) + '", PIN ' + r.pin; }).join('\n');
+      $('pins-choose').hidden = true;
+      $('pins-result').hidden = false;
+      if (!phloBackend.enabled) toast('PINs saved. Drivers can sign in once the dispatch server is set up.');
+      else if (!signedIn()) toast('PINs saved on this device. Sign in with Google so drivers can use them.');
+    }).catch(function (e) { toast('Could not make PINs: ' + e.message); })
+      .then(function () { $('pins-make').disabled = false; });
+  }
+
+  function copyPins() {
+    var text = $('pins-dialog').pinsText || '';
+    (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject(new Error('no clipboard')))
+      .then(function () { toast('Copied.'); }, function () { toast('Could not copy: select the table and copy it instead.'); });
+  }
+
+  function printPins() {
+    var area = $('print-area');
+    area.textContent = '';
+    area.appendChild(el('section', { class: 'print-page' }, [
+      el('h1', { text: 'PHLO driver app PINs' }),
+      el('p', { class: 'pmeta', text: 'Sign in at https://yourphlo.github.io/phlo/ > Driver sign-in. Keep these private.' }),
+      $('pins-rows').closest('table').cloneNode(true)
+    ]));
+    window.print();
   }
 
   function downloadDrivers() {
@@ -1089,6 +1164,10 @@
       phloMaps.attach(input, function (pin) { formPins[k] = pin; renderPinNote(k); });
     });
     $('download-drivers').addEventListener('click', downloadDrivers);
+    $('set-pins').addEventListener('click', openPins);
+    $('pins-make').addEventListener('click', makePins);
+    $('pins-copy').addEventListener('click', copyPins);
+    $('pins-print').addEventListener('click', printPins);
     document.querySelectorAll('.cov-tools [data-tool]').forEach(function (b) {
       b.addEventListener('click', function () { setTool(b.getAttribute('data-tool')); });
     });

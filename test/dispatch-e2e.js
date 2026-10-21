@@ -17,7 +17,7 @@ const web = http.createServer((req, res) => {
   const f = path.join(root, 'web', decodeURIComponent(req.url.split('?')[0]).replace(/^\/$/, '/index.html'));
   if (!fs.existsSync(f)) { res.writeHead(404); return res.end(); }
   let body = fs.readFileSync(f);
-  if (f.endsWith('config.js')) body = String(body).replace("dispatchUrl: ''", `dispatchUrl: '${DISPATCH}'`);
+  if (f.endsWith('config.js')) body = String(body).replace(/dispatchUrl: '[^']*'/, `dispatchUrl: '${DISPATCH}'`);
   res.writeHead(200, { 'Content-Type': f.endsWith('.js') ? 'text/javascript' : f.endsWith('.css') ? 'text/css' : 'text/html' });
   res.end(body);
 });
@@ -113,6 +113,17 @@ async function setup(page, errors) {
   await office.waitForTimeout(1200);
   check(JSON.parse(server.props.accounts || '{}').ana && JSON.parse(server.props.accounts).ana.hash.length === 64, 'driver logins sent to the server (ana)');
   check((await office.textContent('#drivers')).includes('App ana'), 'driver list shows app username');
+  // Random PINs for everyone still without one (Bo).
+  await office.click('#set-pins');
+  check((await office.textContent('#pins-missing-label')).includes('(1)'), 'one driver without a PIN');
+  await office.click('#pins-make');
+  await office.waitForSelector('#pins-result:not([hidden])');
+  const pinRows = await office.$$eval('#pins-rows tr', l => l.map(r => [...r.children].map(td => td.textContent)));
+  check(pinRows.length === 1 && pinRows[0][0] === 'Bo Kim' && pinRows[0][1] === 'bo' && /^\d{6}$/.test(pinRows[0][2]), 'Bo got a 6-digit PIN ' + JSON.stringify(pinRows));
+  await office.click('#pins-result button:has-text("Done")');
+  await office.waitForTimeout(1200);
+  const bo = server.post({ action: 'driver.login', username: 'bo', pin: pinRows[0][2] });
+  check(bo.ok, 'Bo can sign in with the new PIN');
 
   await office.click('.tab[data-view="dispatch"]');
   check((await office.textContent('#dp-summary')).includes('6 stops'), 'dispatch summary: ' + await office.textContent('#dp-summary'));

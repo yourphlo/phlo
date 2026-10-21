@@ -190,6 +190,8 @@ const sch = ctx.phloSchedule([10, 20, 30, 15], 3, { availableFrom: '11:30', avai
 eq([sch.etas, sch.finish, sch.driveMin, sch.late, sch.lunchBefore], [['11:40', '12:35', '13:10'], '13:30', 75, [2], 1], 'schedule with lunch and late stop');
 eq(ctx.phloSchedule([10, 10], 2, { speed: 'SLOW' }, { serviceMin: 0, dayStart: '08:00' }).etas, ['08:12', '08:23'], 'slow driver');
 eq(JSON.parse(JSON.stringify(ctx.phloDecodePolyline('_p~iF~ps|U_ulLnnqC_mqNvxq`@'))), [{ lat: 38.5, lng: -120.2 }, { lat: 40.7, lng: -120.95 }, { lat: 43.252, lng: -126.453 }], 'decode polyline');
+eq([ctx.phloRandomPin([12, 7, 3, 9, 0, 5]), ctx.phloRandomPin([1, 1, 1, 1, 1, 1]), ctx.phloRandomPin([1, 2, 3, 4, 5, 6]), ctx.phloRandomPin([9, 8, 7, 6, 5, 4]), ctx.phloRandomPin([8, 9, 0, 1, 2, 3])],
+  ['273905', null, null, null, null], 'random PINs skip easy ones');
 eq([ctx.phloUsername(' Ana  Maria'), ctx.phloUsername("O'Neil")], ['ana', 'oneil'], 'usernames');
 eq(ctx.phloNavUrl({ lat: 34.1, lng: -118.2 }), 'https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=34.1,-118.2', 'nav link');
 eq([ctx.phloCheckUpdate({ status: 'delivered', methods: ['door'] }).length, ctx.phloCheckUpdate({ status: 'delivered', methods: ['approved'] }).length,
