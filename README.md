@@ -14,7 +14,9 @@ Two ways to run it (same logic, same results):
 
 ### Daily use
 
-1. Open the page and **Sign in with Google** (the account that can see the store sheets).
+1. Open the page and **Sign in with Google** as yourphlo@gmail.com. Nothing else on the page shows
+   until you do, and any other Google account is signed straight back out (the allowed accounts are
+   `allowedEmails` in `web/config.js`).
 2. Pick the **delivery date** (defaults to tomorrow) and click **Build master**.
 3. Each store shows how many rows it gave and when its sheet was last updated. A store with
    0 rows or "no file found" probably hasn't entered its list yet.
