@@ -134,7 +134,9 @@ tr.flash td { animation: flash 1.6s ease-out; }
 .tab[aria-current="page"] { color: var(--ink); background: var(--card); border-color: var(--line); }
 .tab .pill:empty { display: none; }
 .view { display: grid; gap: 16px; min-width: 0; }
-.view[hidden] { display: none; }
+.view[hidden], .tabs[hidden] { display: none; }
+.locked { text-align: center; padding: 40px 18px; }
+.locked h2 { justify-content: center; }
 
 .driver-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
 .driver-form .wide { grid-column: 1 / -1; }

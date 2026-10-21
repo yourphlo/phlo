@@ -75,8 +75,10 @@
         if (resp.error) { toast('Sign-in failed: ' + resp.error); return; }
         state.token = resp.access_token;
         state.tokenExpires = Date.now() + (resp.expires_in - 60) * 1000;
-        if (state.onToken) { var f = state.onToken; state.onToken = null; f(); }
-        afterSignIn();
+        checkAccount().then(function (email) {
+          if (state.onToken) { var f = state.onToken; state.onToken = null; f(); }
+          afterSignIn(email);
+        }, rejectAccount);
       }
     });
   }
@@ -91,16 +93,42 @@
     state.tokenClient.requestAccessToken({ prompt: state.token ? '' : 'consent' });
   }
 
-  function afterSignIn() {
+  var ALLOWED = (CFG.allowedEmails || []).map(function (e) { return String(e).trim().toLowerCase(); });
+
+  /** Resolves with the signed-in account's email if it is allowed to use the app, else rejects with it. */
+  function checkAccount() {
+    return fetch('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)', { headers: { Authorization: 'Bearer ' + state.token } })
+      .then(function (res) { return res.ok ? res.json() : {}; })
+      .then(function (r) {
+        var email = String(r.user && r.user.emailAddress || '').toLowerCase();
+        if (!email) throw new Error('');
+        if (ALLOWED.length && ALLOWED.indexOf(email) < 0) throw new Error(email);
+        return email;
+      });
+  }
+
+  /** Wrong account (or it couldn't be checked): drop its access and stay locked. */
+  function rejectAccount(e) {
+    var token = state.token, wasIn = state.session;
+    state.token = null; state.tokenExpires = 0; state.onToken = null;
+    if (token && google.accounts.oauth2.revoke) google.accounts.oauth2.revoke(token, function () {});
+    if (wasIn) { location.reload(); return; }
+    toast(e && e.message ? e.message + ' can\'t use this app. Sign in with ' + (ALLOWED[0] || 'the PHLO account') + '.' :
+      'Could not check which Google account signed in. Try again.');
+  }
+
+  function afterSignIn(email) {
+    var first = !state.session;
     state.session = true;
+    $('who').textContent = email;
     $('signin').hidden = true;
     $('signout').hidden = false;
     $('build').disabled = false;
+    $('locked').hidden = true;
+    $('tabs').hidden = false;
+    if (first) showView(state.view);
     loadDriversFromDrive();
     loadHistoryFromDrive();
-    api('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)').then(function (r) {
-      $('who').textContent = r.user && r.user.emailAddress || '';
-    }).catch(function () { /* not important */ });
   }
 
   // Signing out reloads the page, which wipes every patient row it was showing (nothing patient-related
@@ -1019,7 +1047,10 @@
     XLSX.writeFile(wb, phloFmt(fromIso(iso), 'MM.dd.yy') + '_DRIVERS.xlsx');
   }
 
+  // Nothing is shown until an allowed account signs in.
   function showView(name) {
+    state.view = name;
+    if (!state.session) { $('view-master').hidden = $('view-drivers').hidden = true; return; }
     document.querySelectorAll('.tab').forEach(function (t) {
       if (t.getAttribute('data-view') === name) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
     });
@@ -1042,6 +1073,7 @@
     updateWindowNote();
     $('date').addEventListener('change', updateWindowNote);
     $('signin').addEventListener('click', function () { signIn(); });
+    $('signin-main').addEventListener('click', function () { signIn(); });
     $('signout').addEventListener('click', signOut);
     $('build').addEventListener('click', build);
     $('download').addEventListener('click', download);

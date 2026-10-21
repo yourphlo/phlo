@@ -24,7 +24,7 @@
     </div>
   </header>
 
-  <nav class="tabs" aria-label="Sections">
+  <nav id="tabs" class="tabs" aria-label="Sections" hidden>
     <button class="tab" data-view="master" aria-current="page">Master</button>
     <button class="tab" data-view="drivers">Drivers <span id="drivers-tab-count" class="pill"></span></button>
   </nav>
@@ -40,7 +40,13 @@
       <button id="save-client" class="btn">Save</button>
     </section>
 
-    <div id="view-master" class="view">
+    <section id="locked" class="card locked">
+      <h2>Sign in to use PHLO</h2>
+      <p class="muted">Only the PHLO Google account can open the master and driver pages.</p>
+      <button id="signin-main" class="btn primary">Sign in with Google</button>
+    </section>
+
+    <div id="view-master" class="view" hidden>
     <section class="card controls">
       <label class="field">Delivery date
         <input id="date" type="date">
