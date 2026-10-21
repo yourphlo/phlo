@@ -58,19 +58,6 @@
       </div>
     </section>
 
-    <section id="history-card" class="card" hidden>
-      <h2>Past deliveries <span id="history-count" class="pill"></span></h2>
-      <p id="history-lead" class="history-lead"></p>
-      <p class="muted small">Checks the previous delivery day's master. Any ticket on it not confirmed delivered goes
-        on the next master. Older days are not carried.
-        <span id="history-sync"></span></p>
-      <label id="routific-drop" class="drop">
-        <input id="routific-file" type="file" accept=".csv,.xlsx,.xls" multiple>
-        <span>Drop Routific exports (the date comes from the file name)</span>
-      </label>
-      <ul id="history" class="history"></ul>
-    </section>
-
     <section id="stores-card" class="card" hidden>
       <h2>Stores</h2>
       <ul id="stores" class="stores"></ul>
@@ -185,7 +172,6 @@
   <script src="core.js"></script>
   <script src="drivers.js"></script>
   <script src="maps.js"></script>
-  <script src="history.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

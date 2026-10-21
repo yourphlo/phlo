@@ -28,29 +28,6 @@ Two ways to run it (same logic, same results):
 6. Optional: drop your hand-edited upload file into **Check a finished file** to see any RX
    number missing from it, any that isn't in the store sheets, and typos.
 
-### Past deliveries (tickets carried over)
-
-The **Past deliveries** panel keeps every master's ticket (RX) numbers by delivery date, saved to
-your Google account like the driver profiles. Only the **previous delivery day** (Sundays skipped)
-is checked: any ticket on it that is not confirmed delivered goes on the next master. Older days
-are not carried.
-
-- **Build master** also rebuilds the previous delivery day from the store sheets and saves it, so
-  its tickets are tracked even if you didn't download that day's master.
-  A master you downloaded or checked in **Check a finished file** is kept instead of the rebuild.
-- Tickets carried over are added to the master, under their store, highlighted with
-  "from 10/20". The checks list says when each one was first on a master.
-- To take a ticket off, confirm it was delivered:
-  - drop the **Routific stops export** for that day (the date comes from the file name, e.g.
-    `... - 2026-10-20.csv`). Delivered stops are marked delivered; failed or unscheduled stops
-    are marked not delivered and stay on the master. If the file has no status column, every
-    routed stop counts as delivered.
-  - or click **Mark the rest delivered** for a day, or tick single tickets under **Tickets**.
-    Once a day has nothing left unconfirmed the button becomes **Undo mark delivered**.
-- A **Routific summary** (Driver Name, Time, Distance, Number of Stops) has no ticket numbers.
-  It is saved with the day and the panel compares its stop count with the master and flags
-  unscheduled stops, but it cannot say which tickets were delivered.
-
 ### Drivers
 
 The **Drivers** tab keeps a profile for each driver: name and start address (required), end
@@ -78,9 +55,9 @@ Patient data never leaves your browser and Google (driver addresses typed in the
 Google Maps for suggestions): the page reads the sheets with your own
 Google sign-in and builds the file locally. Nothing is stored on GitHub.
 
-Patient data is never saved in the browser. The past deliveries are kept only in your Google account
-and shown only while you're signed in. **Sign out** clears the page. (Older versions kept a copy in
-the browser; the page deletes it the first time it opens on that computer.) Downloaded `.xlsx` files
+Patient data is never saved in the browser or kept between visits. **Sign out** clears the page.
+(Older versions kept past deliveries in the browser; the page deletes that copy the first time it
+opens on that computer.) Downloaded `.xlsx` files
 are in your Downloads folder, so delete them there when you're done with them.
 
 ### Web app setup (one time, about 15 minutes)
