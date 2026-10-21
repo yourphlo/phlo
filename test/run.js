@@ -10,7 +10,7 @@ const { execFileSync } = require('child_process');
 const root = path.join(__dirname, '..');
 const ctx = {};
 vm.createContext(ctx);
-for (const f of ['web/stores.js', 'web/core.js', 'web/drivers.js', 'web/history.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
+for (const f of ['web/stores.js', 'web/core.js', 'web/drivers.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
 
 let failures = 0;
 const eq = (a, b, msg) => {
@@ -104,71 +104,6 @@ eq(ctx.phloDriverRows([drv])[1], ['Ana Ruiz', '1 Main St', '', '08:00', '17:00',
 const roster = ctx.phloDriversData({ drivers: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], roster: { '2026-10-19': ['a'], '2026-10-21': ['b', 'gone'], bad: ['a'] } });
 eq([ctx.phloRosterFor(roster, '2026-10-18'), ctx.phloRosterFor(roster, '2026-10-20'), ctx.phloRosterFor(roster, '2026-10-21')], [['a', 'b'], ['a'], ['b']], 'roster fallback');
 eq(Object.keys(roster.roster), ['2026-10-19', '2026-10-21'], 'roster drops bad keys');
-
-/* ---------- delivery history + carry-over ---------- */
-eq(ctx.phloLookbackDays('2026-10-21', 3), ['2026-10-20', '2026-10-19', '2026-10-17'], 'lookback skips Sunday');
-eq(ctx.phloLookbackDays('2026-10-22', 4), ['2026-10-21', '2026-10-20', '2026-10-19', '2026-10-17'], 'lookback 4');
-const H = ctx.phloHistoryData(null);
-const row = (rx, code) => [rx + ',PAT,ONE', '1 A ST TOWN CA 91000', code || 'EM', ''];
-ctx.phloSaveDay(H, '2026-10-17', [row('2000001'), row('2000002')], 'rebuilt', 't1');
-ctx.phloSaveDay(H, '2026-10-19', [row('2000003'), row('2000004, 2000005')], 'download', 't1');
-ctx.phloSaveDay(H, '2026-10-20', [row('2000006'), row('2000007'), row('2000001')], 'built', 't1');
-eq(ctx.phloSaveDay(H, '2026-10-19', [row('9999999')], 'rebuilt', 't2'), false, 'rebuild never replaces a downloaded master');
-ctx.phloMarkRx(H, '2026-10-17', ['2000001', '2000002'], 'delivered');
-ctx.phloMarkRx(H, '2026-10-19', ['2000003', '2000004', '2000005'], 'delivered');
-ctx.phloMarkRx(H, '2026-10-20', ['2000006'], 'delivered');
-ctx.phloMarkRx(H, '2026-10-20', ['2000007'], 'missed');
-// Only the previous delivery day (10/20) is checked. 2000001 is on it and not confirmed -> carried.
-const out = ctx.phloOutstanding(H, '2026-10-21', [row('2000007')]);
-eq(out.map(o => [o.rx, o.lastIso, o.firstIso]), [[['2000001'], '2026-10-20', '2026-10-20']], 'outstanding: previous day only, today skipped');
-eq(ctx.phloOutstanding(H, '2026-10-21', []).map(o => o.rx.join() + (o.missed ? '!' : '')).sort(), ['2000001', '2000007!'], 'missed is carried');
-eq(ctx.phloOutstanding(H, '2026-10-20', []).length, 0, 'only days before the build date count');
-ctx.phloMarkRx(H, '2026-10-19', ['2000005'], null);
-eq(ctx.phloOutstanding(H, '2026-10-21', [row('2000007'), row('2000001')]), [], 'an unconfirmed ticket two delivery days back is not carried');
-eq(ctx.phloOutstanding(H, '2026-10-20', []).map(o => [o.rx, o.row[0]]), [[['2000005'], '2000004, 2000005,PAT,ONE']], 'combo row carried for its open RX (Sunday skipped)');
-eq(ctx.phloDayCounts(H.days['2026-10-20']), { total: 3, delivered: 1, missed: 1, open: 1 }, 'day counts');
-// Mark the rest delivered, then undo: only the tickets it marked go back to not confirmed.
-const B = ctx.phloHistoryData(null);
-ctx.phloSaveDay(B, '2026-10-20', [row('3000001'), row('3000002'), row('3000003'), row('3000004')], 'download', 't');
-ctx.phloMarkRx(B, '2026-10-20', ['3000001'], 'delivered');
-ctx.phloMarkRx(B, '2026-10-20', ['3000002'], 'missed');
-eq(ctx.phloMarkRest(B, '2026-10-20'), 2, 'mark rest count');
-eq(ctx.phloBulkRx(B, '2026-10-20'), ['3000003', '3000004'], 'mark rest remembers what it marked');
-const B2 = ctx.phloHistoryData(JSON.parse(JSON.stringify(B)));
-eq(ctx.phloBulkRx(B2, '2026-10-20'), ['3000003', '3000004'], 'undo list survives saving to Google');
-ctx.phloMarkRx(B2, '2026-10-20', ['3000003'], null);
-eq(ctx.phloUndoMarkRest(B2, '2026-10-20'), 1, 'undo skips a ticket already unticked by hand');
-eq([B2.days['2026-10-20'].status, ctx.phloBulkRx(B2, '2026-10-20')], [{ 3000001: 'delivered', 3000002: 'missed' }, []], 'undo keeps hand ticks and not-delivered');
-// A day marked before the undo list existed: unmark puts every delivered ticket back, keeps not delivered.
-const L = ctx.phloHistoryData({ days: { '2026-10-20': { rows: [row('3000011'), row('3000012'), row('3000013')], source: 'download', status: { 3000011: 'delivered', 3000012: 'delivered', 3000013: 'missed' } } } });
-eq([ctx.phloBulkRx(L, '2026-10-20'), ctx.phloUnmarkDelivered(L, '2026-10-20'), L.days['2026-10-20'].status], [[], 2, { 3000013: 'missed' }], 'unmark an old day');
-const old = ctx.phloHistoryData({ days: { '2026-06-01': { rows: [row('2000010')], status: { 2000010: 'delivered' } }, '2026-06-02': { rows: [row('2000011')] } } });
-ctx.phloPruneHistory(old, '2026-10-21');
-eq(Object.keys(old.days), ['2026-06-02'], 'prune keeps old days with open tickets');
-const m = ctx.phloMergeHistory(
-  ctx.phloHistoryData({ days: { '2026-10-20': { rows: [row('2000020')], source: 'built', savedAt: 'b', status: { 2000020: 'delivered' } } } }),
-  ctx.phloHistoryData({ days: { '2026-10-20': { rows: [row('2000020'), row('2000021')], source: 'download', savedAt: 'a' }, '2026-10-19': { rows: [row('2000022')] } } }));
-eq([Object.keys(m.days).sort(), m.days['2026-10-20'].rows.length, m.days['2026-10-20'].status], [['2026-10-19', '2026-10-20'], 2, { 2000020: 'delivered' }], 'merge');
-
-// Routific: the summary export (stop counts only), and a stops export.
-eq(ctx.phloDateFromFileName('Routific summary - 10.20.26 - 2026-10-20.csv', ctx.phloUtc(2026, 10, 21)), '2026-10-20', 'date from file name');
-eq(ctx.phloDateFromFileName('routes 10.17.26.xlsx', ctx.phloUtc(2026, 10, 21)), '2026-10-17', 'short date from file name');
-const sum = ctx.phloParseRoutific([['Driver Name', 'Time(min)', 'Distance(miles)', 'Number of Stops'],
-  ['DRIVER A', '754', '86.05', '51'], ['DRIVER B', '479', '57.26', '33'], ['UNSCHEDULED', '38', '17.78', '1'], ['']]);
-eq([sum.kind, sum.routed, sum.unscheduled, sum.drivers.length, sum.stops.length], ['summary', 84, 1, 2, 0], 'routific summary');
-const stops = ctx.phloParseRoutific([['Driver Name', 'Stop Number', 'Visit Name', 'Address', 'Status'],
-  ['DRIVER A', '1', '2000001,PAT,ONE', '1 A ST TOWN CA 91000', 'Delivered'],
-  ['DRIVER A', '2', '2000007,PAT,ONE', '1 A ST TOWN CA 91000', 'Failed'],
-  ['DRIVER A', '3', '2000099,X,Y', '1 A ST TOWN CA 91000', 'Delivered'],
-  ['UNSCHEDULED', '', '2000006,PAT,ONE', '1 A ST TOWN CA 91000', '']]);
-eq([stops.kind, stops.routed, stops.unscheduled, stops.hasStatus, stops.stops.map(s => s.delivered)], ['stops', 3, 1, true, [true, false, true, false]], 'routific stops');
-const res = ctx.phloApplyRoutific(H, '2026-10-20', stops);
-eq([res.delivered, res.missed, res.notOnMaster, H.days['2026-10-20'].status], [1, 2, ['2000099'], { 2000001: 'delivered', 2000006: 'missed', 2000007: 'missed' }], 'apply routific');
-eq(ctx.phloParseRoutific([['Driver', 'Name'], ['DRIVER A', '2000030, 2000031,A,B']]).stops[0], { rx: ['2000030', '2000031'], driver: 'DRIVER A', delivered: true }, 'no status column: routed = delivered');
-// A stops file dropped before the day was saved is applied when the rows arrive.
-const H2 = ctx.phloHistoryData({ days: { '2026-10-20': { rows: [], routific: { kind: 'stops', stops: [{ rx: ['2000040'], delivered: false }] } } } });
-ctx.phloSaveDay(H2, '2026-10-20', [row('2000040')], 'rebuilt', 't');
-eq(H2.days['2026-10-20'].status, { 2000040: 'missed' }, 'routific applied on later save');
 
 try { execFileSync('node', [path.join(root, 'scripts/sync-apps-script.js'), '--check'], { stdio: 'inherit' }); }
 catch (e) { failures++; }
