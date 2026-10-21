@@ -32,7 +32,14 @@ The **Drivers** tab keeps a profile for each driver: name and start address (req
 address, availability hours, mobile number, capacity, types (case sensitive, e.g. `FRIDGE`),
 driving speed (SLOW 10% / NORMAL 100% / FAST 190%) and lunch break.
 
+Availability can be just a start time, just an end time, both, or empty. Lunch break needs both.
+
 1. Click **Add driver**, fill in the form, **Save driver**. Click a name later to edit it, × to delete.
+   In the address boxes, start typing and pick the address from the Google suggestions: that
+   fills in the full address and pins its exact spot on Google Maps (saved with the profile, ready
+   for route planning). Each address in the list has a **Map** link; "Map (not pinned)" means the
+   address was typed by hand, so open the driver and pick it from the suggestions. Suggestions need
+   the Google Maps key (setup step 4 below); without it the boxes are plain text.
 2. Pick the **Working on** date (defaults to tomorrow) and tick who is driving that day. A new
    date starts with the same drivers as the last day you set.
 3. **Download drivers .xlsx** saves the working drivers (`10.21.26_DRIVERS.xlsx`), one row per
@@ -42,7 +49,8 @@ When you're signed in, profiles are saved to your own Google account (a hidden a
 your Google Drive), so they show up on any computer once you sign in with the same account.
 Signed out, they are kept in that browser only and uploaded the next time you sign in.
 
-Patient data never leaves your browser and Google: the page reads the sheets with your own
+Patient data never leaves your browser and Google (driver addresses typed in the driver form go to
+Google Maps for suggestions): the page reads the sheets with your own
 Google sign-in and builds the file locally. Nothing is stored on GitHub.
 
 ### Web app setup (one time, about 15 minutes)
@@ -72,6 +80,18 @@ Google sign-in and builds the file locally. Nothing is stored on GitHub.
 **3. Give the page the client ID** - either paste it into `web/config.js` (`clientId: '...'`)
 and push, or paste it into the setup box the first time you open the page (remembered in that
 browser).
+
+**4. Google Maps addresses (optional)** in the same Google Cloud project
+
+1. Google Maps needs a billing account on the project (**Billing**). Address suggestions for a few
+   drivers should stay within Google's free monthly usage, but set a budget alert to be safe.
+2. **APIs & Services > Library**: enable **Maps JavaScript API** and **Places API (New)**.
+3. **APIs & Services > Credentials > Create credentials > API key**. Edit the key:
+   - **Application restrictions: Websites**, add `https://yourphlo.github.io/*` (and
+     `http://localhost:8000/*` for testing on a computer).
+   - **API restrictions: Restrict key** to Maps JavaScript API and Places API (New).
+4. Paste the key into `web/config.js` (`mapsApiKey: '...'`) and push. A key limited to your website
+   is meant to be in the page; it doesn't work from anywhere else.
 
 The first sign-in shows "Google hasn't verified this app" because it's your own private app;
 click **Continue**.
