@@ -26,6 +26,11 @@
     var t = $('toast'); t.textContent = msg; t.hidden = false;
     clearTimeout(toast.timer); toast.timer = setTimeout(function () { t.hidden = true; }, 4000);
   }
+  /** "Pharmacy wrote: ..." from the notes, when the office's route uses a corrected address. */
+  function typedAddress(s) {
+    return String(s.notes || '').split(' · ').filter(function (p) { return p.indexOf('Pharmacy wrote: ') === 0; })[0] || '';
+  }
+
   function niceDate(iso) {
     var p = iso.split('-');
     return new Date(Date.UTC(+p[0], +p[1] - 1, +p[2])).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'long', month: 'short', day: 'numeric' });
@@ -127,6 +132,7 @@
         el('span', { class: 'seq', text: u ? (u.status === 'delivered' ? '✓' : '!') : String(s.seq) }),
         el('span', { class: 'nm' }, [el('span', { text: s.name }), el('span', { class: 'muted small', text: s.eta ? phloClock(s.eta) : '' })]),
         el('span', { class: 'ad', text: s.address }),
+        typedAddress(s) ? el('span', { class: 'ad typed', text: typedAddress(s) }) : null,
         chips
       ]);
       btn.addEventListener('click', function () { openStop(s); });
@@ -142,7 +148,7 @@
     var f = $('dv-form');
     f.reset();
     $('dv-stop-title').textContent = s.seq + '. ' + s.name;
-    $('dv-stop-address').textContent = s.address;
+    $('dv-stop-address').textContent = s.address + (typedAddress(s) ? ' (' + typedAddress(s) + ')' : '');
     var meta = $('dv-stop-meta');
     meta.textContent = '';
     if (s.eta) meta.appendChild(el('span', { class: 'chip', text: 'ETA ' + phloClock(s.eta) }));

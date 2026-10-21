@@ -20,9 +20,22 @@
   // Check before sending lists address problems only; who takes which stop is checked by hand.
   var FLAG_TEXT = {
     notFound: 'Address not found on Google Maps',
-    partial: 'Google only found part of this address'
+    partial: 'Google only found part of this address, so the route uses the address it found'
   };
   function addressFlags(flags) { return flags.filter(function (f) { return FLAG_TEXT[f]; }); }
+
+  /** The address the route uses: what Google found, else what was typed. */
+  function useAddr(s) { return s.formatted || s.address; }
+
+  /** "Pharmacy wrote: ..." when the route uses a different address than the pharmacy typed (Google only found
+   * part of it, or it was retyped here), so the driver and office can still see the original. */
+  function typedNote(s) { return s.typed && (s.partial || s.address !== s.typed) ? 'Pharmacy wrote: ' + s.typed : ''; }
+
+  /** An address cell: the address used, with the pharmacy's original underneath when it differs. */
+  function addrCell(s) {
+    var t = typedNote(s);
+    return el('td', {}, [useAddr(s), t ? el('br') : null, t ? el('span', { class: 'typed', text: t }) : null]);
+  }
 
   /* ---------------- setup + summary ---------------- */
 
@@ -168,7 +181,7 @@
 
     var stops = rows.map(function (row, i) {
       var info = phloStopInfo(row);
-      return { id: phloStopId(row), row: i, name: String(row[0] || ''), address: String(row[1] || ''), store: info.store,
+      return { id: phloStopId(row), row: i, name: String(row[0] || ''), address: String(row[1] || ''), typed: String(row[1] || ''), store: info.store,
         notes: String(row[3] || ''), copay: info.copay, tags: info.tags, lat: null, lng: null, flags: [] };
     });
     // Two rows with the same RX numbers would share an id: keep ids unique.
@@ -310,8 +323,8 @@
     plan.problems.forEach(function (p) { items.push({ level: 'error', text: p }); });
     plan.stops.forEach(function (s) {
       s.flags.forEach(function (f) {
-        var extra = f === 'partial' ? ' (found: ' + (s.formatted || '?') + ')' : '';
-        items.push({ level: f === 'notFound' ? 'error' : 'warn', stop: s, flag: f, text: FLAG_TEXT[f] + extra });
+        var extra = f === 'partial' ? ': ' + (s.formatted || '?') + '. ' + typedNote(s) + '.' : '';
+        items.push({ level: f === 'notFound' ? 'error' : 'info', stop: s, flag: f, text: FLAG_TEXT[f] + extra });
       });
     });
     items.forEach(function (it) {
@@ -372,7 +385,7 @@
           el('td', { class: 'num', text: String(i + 1) }),
           el('td', { class: 'eta', text: phloClock(s.eta) }),
           el('td', { class: 'code', text: s.name }),
-          el('td', { text: s.address }),
+          addrCell(s),
           el('td', { text: [s.store, s.notes].filter(Boolean).join(' · ') }),
           el('td', {}, [moveSelect(s)])
         ]));
@@ -387,7 +400,7 @@
     if (off.length) {
       var det = el('details', { class: 'dp-route', 'data-id': '_none', open: '' }, [el('summary', {}, [el('b', { text: 'Not on a route' }), el('span', { class: 'warn-txt', text: off.length + ' stop' + (off.length === 1 ? '' : 's') })])]);
       var ul = el('ul', { class: 'live-list' });
-      off.forEach(function (s) { ul.appendChild(el('li', {}, [el('span', { class: 'seq', text: '–' }), el('span', { class: 'what' }, [el('b', { text: s.name }), ' ' + s.address]), moveSelect(s)])); });
+      off.forEach(function (s) { ul.appendChild(el('li', {}, [el('span', { class: 'seq', text: '–' }), el('span', { class: 'what' }, [el('b', { text: s.name }), ' ' + useAddr(s)]), moveSelect(s)])); });
       det.appendChild(el('div', { class: 'table-wrap' }, [ul]));
       box.appendChild(det);
     }
@@ -462,7 +475,7 @@
     colors = colors || A.colors();
     var on = !!dmap.sel[s.id];
     s.marker.setIcon({ path: google.maps.SymbolPath.CIRCLE, scale: on ? 13 : 10, fillColor: s.driverId ? colors[s.driverId] : '#777777', fillOpacity: 1,
-      strokeColor: on ? '#111111' : s.flags.length ? '#b42318' : '#ffffff', strokeWeight: on ? 4 : s.flags.length ? 3 : 1.5 });
+      strokeColor: on ? '#111111' : s.flags.length ? '#e08a1e' : '#ffffff', strokeWeight: on ? 4 : s.flags.length ? 3 : 1.5 });
     s.marker.setZIndex(on ? 3 : 2);
   }
 
@@ -587,10 +600,11 @@
 
   function openInfo(s, marker) {
     var box = el('div', { class: 'info-win' }, [
-      el('b', { text: s.name }), el('span', { text: s.address }),
+      el('b', { text: s.name }), el('span', { text: useAddr(s) }),
+      typedNote(s) ? el('span', { style: 'color:#6b6862', text: typedNote(s) }) : null,
       s.eta ? el('span', { text: 'Stop ' + s.seq + ' · ETA ' + phloClock(s.eta) }) : null,
       s.notes ? el('span', { text: s.notes }) : null,
-      s.flags.length ? el('span', { style: 'color:#b42318', text: s.flags.map(function (f) { return FLAG_TEXT[f]; }).join('; ') }) : null,
+      s.flags.length ? el('span', { style: 'color:#8a5a00', text: s.flags.map(function (f) { return FLAG_TEXT[f]; }).join('; ') }) : null,
       el('label', {}, ['Driver ', moveSelect(s)])
     ]);
     dmap.info.setContent(box);
@@ -620,7 +634,7 @@
         var s = byId[id];
         tb.appendChild(el('tr', {}, [
           el('td', { text: String(i + 1) }), el('td', { text: phloClock(s.eta) }),
-          el('td', { text: s.name }), el('td', { text: s.address }), el('td', { text: [s.store, s.notes].filter(Boolean).join(' · ') }),
+          el('td', { text: s.name }), addrCell(s), el('td', { text: [s.store, s.notes].filter(Boolean).join(' · ') }),
           el('td', { class: 'box', text: '☐ Delivered  ☐ Not delivered\n☐ Mailbox  ☐ Front door\n☐ Approved by ________\nCopay $______' }),
           el('td', { text: '' })
         ]));
@@ -641,10 +655,10 @@
   function sendRoutes() {
     var token = A.token();
     if (!token) { A.signIn(sendRoutes); return; }
-    var flagged = plan.stops.filter(function (s) { return s.flags.length; }).length;
+    var flagged = plan.stops.filter(function (s) { return s.flags.indexOf('notFound') >= 0; }).length;
     var off = plan.stops.filter(function (s) { return !s.driverId; }).length;
     var msg = 'Send ' + plan.drivers.filter(function (d) { return plan.routes[d.id].stopIds.length; }).length + ' routes for ' + A.niceDate(A.fromIso(plan.iso)) + ' to the drivers?';
-    if (flagged) msg += '\n\n' + flagged + ' stop' + (flagged === 1 ? ' still has an address problem' : 's still have address problems') + ' in "Check before sending".';
+    if (flagged) msg += '\n\n' + flagged + ' stop' + (flagged === 1 ? '\'s address was' : 's\' addresses were') + ' not found on Google Maps (see "Check before sending").';
     if (off) msg += '\n' + off + ' stop' + (off === 1 ? ' is' : 's are') + ' not on any route and will not be sent.';
     msg += '\n\nSending again later replaces these routes; what drivers already recorded is kept.';
     if (!confirm(msg)) return;
@@ -656,7 +670,8 @@
         start: r.schedule.start, finish: r.schedule.finish,
         stops: r.stopIds.map(function (id, i) {
           var s = byId[id];
-          return { id: s.id, seq: i + 1, name: s.name, address: s.formatted || s.address, store: s.store, notes: s.notes,
+          // The driver gets the address Google found; the pharmacy's original rides in the notes when it differs.
+          return { id: s.id, seq: i + 1, name: s.name, address: useAddr(s), store: s.store, notes: [typedNote(s), s.notes].filter(Boolean).join(' · '),
             copay: s.copay, tags: s.tags, eta: s.eta, lat: s.lat, lng: s.lng };
         })
       };
