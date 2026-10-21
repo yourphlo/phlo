@@ -18,14 +18,14 @@ const XLSX = require(xlsxJs);
 const vm = require('vm');
 const ctx = {}; vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(path.join(root, 'web/stores.js'), 'utf8'), ctx);
-const TAB = { WT: 'RX OCT 2026', 'WT DME': 'DME OCT 2026', EM: 'OCT 2026🎃', ARC: 'October 2026', SG: 'October 2026', ARC2: 'OCT-2026' };
+const TAB = { TX: 'PHLO', WT: 'RX OCT 2026', 'WT DME': 'DME OCT 2026', EM: 'OCT 2026🎃', ARC: 'October 2026', SG: 'October 2026', ARC2: 'OCT-2026' };
 const byId = {};
 for (const s of ctx.STORES) {
   if (!s.id) continue;
   byId[s.id] = byId[s.id] || [];
   byId[s.id].push({ code: s.code, tab: TAB[s.code] || 'OCT 2026', xlsx: !!s.xlsx });
 }
-const fixture = code => JSON.parse(fs.readFileSync(path.join(fx, code.replace(' ', '_') + '.json'), 'utf8'));
+const fixture = code => { const j = JSON.parse(fs.readFileSync(path.join(fx, code.replace(' ', '_') + '.json'), 'utf8')); return Array.isArray(j) ? j : j.values; };
 
 function arc2Xlsx() {
   const wb = XLSX.utils.book_new();
@@ -88,7 +88,7 @@ const FAKE_GSI = `window.google = { accounts: { oauth2: {
   await page.waitForFunction(() => window.google && window.google.accounts);
   await page.click('#signin');
   await page.waitForSelector('#build:not([disabled])');
-  await page.fill('#date', '2026-10-20');
+  await page.fill('#date', process.env.E2E_DATE || '2026-10-20');
   await page.dispatchEvent('#date', 'change');
   await page.click('#build');
   await page.waitForSelector('#download:not([disabled])', { timeout: 15000 });
@@ -129,7 +129,7 @@ const FAKE_GSI = `window.google = { accounts: { oauth2: {
 
   await browser.close();
   server.close();
-  const ok = rowCount === 175 && got.length - 1 === 174 && String(got[1][0]).endsWith('EDITED') && !errors.length && !overflow;
+  const ok = (process.env.E2E_DATE || rowCount === 175) && got.length - 1 === rowCount - 1 && String(got[1][0]).endsWith('EDITED') && !errors.length && !overflow;
   console.log(ok ? 'E2E OK' : 'E2E FAILED');
   process.exit(ok ? 0 : 1);
 })().catch(e => { console.error(e); server.close(); process.exit(1); });

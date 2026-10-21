@@ -26,6 +26,27 @@ Two ways to run it (same logic, same results):
 6. Optional: drop your hand-edited upload file into **Check a finished file** to see any RX
    number missing from it, any that isn't in the store sheets, and typos.
 
+### Past deliveries (tickets carried over)
+
+The **Past deliveries** panel keeps every master's ticket (RX) numbers by delivery date, saved to
+your Google account like the driver profiles. Any ticket that is not confirmed delivered goes back
+on the next master, however old it is, until someone confirms it.
+
+- **Build master** also rebuilds the past 4 delivery days (Sundays skipped) from the store sheets
+  and saves them, so tickets from earlier days are tracked even before you start downloading.
+  A master you downloaded or checked in **Check a finished file** is kept instead of the rebuild.
+- Tickets carried over are added to the master, under their store, highlighted with
+  "from 10/20". The checks list says when each one was first on a master.
+- To take a ticket off, confirm it was delivered:
+  - drop the **Routific stops export** for that day (the date comes from the file name, e.g.
+    `... - 2026-10-20.csv`). Delivered stops are marked delivered; failed or unscheduled stops
+    are marked not delivered and stay on the master. If the file has no status column, every
+    routed stop counts as delivered.
+  - or click **Mark the rest delivered** for a day, or tick single tickets under **Tickets**.
+- A **Routific summary** (Driver Name, Time, Distance, Number of Stops) has no ticket numbers.
+  It is saved with the day and the panel compares its stop count with the master and flags
+  unscheduled stops, but it cannot say which tickets were delivered.
+
 ### Drivers
 
 The **Drivers** tab keeps a profile for each driver: name and start address (required), end
@@ -139,7 +160,7 @@ For delivery date D:
 |---|---|
 | NAME | `RX#,LAST,FIRST`; patients at the same address become one combo row: `5147457, 5147468,RIVERA,GILBERTO, & AYALA,ISABEL` |
 | ADDRESS | Address with phone numbers, commas and `**...**` tags removed; ZIP+4 cut to 5 digits |
-| NOTES | Store code (VALLEY, LV, WT, WT DME, RM, ARC, TC, PDSN, WSTR, ARC2, BP, SG, EM) |
+| NOTES | Store code (VALLEY, LV, WT, WT DME, RM, ARC, TC, PDSN, WSTR, ARC2, BP, SG, EM, TX) |
 | NOTES 2 | `$copay-COMBO-FRIDGE-notes`, with delivery dates, `BAG 1 OF 2`, `WITH …` and arrows removed |
 
 ## Stores
@@ -154,6 +175,10 @@ name (`OCT 2026`, `October 2026`, `RX OCT 2026`, `OCT-2026`, …).
   name contains "BP" and "PHLO", one tab per day (`Mon 10/19/26`), the layout of the
   June file. Check its row count in the popup the first time it runs.
 - **SG** only takes rows marked `Phlo` (it also lists other drivers).
+- **TX** (TX DELIVERY 2026) only reads its **PHLO** tab, not the daily route tabs (those are
+  TX's own drivers). Each block starts with a date row like `10/20` and goes on the next day's
+  master. Rows are care homes: `RX#s,HOME NAME`, with the bag count in NOTES 2 (`3 BAGS`;
+  one bag is not noted).
 
 ## Tests
 

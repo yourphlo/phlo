@@ -45,8 +45,14 @@ function phloPickupDates(delivery) {
   return out;
 }
 
-/** Monthly tabs to read: every month from 7 days before the delivery up to the delivery. */
+/**
+ * Tabs to read: every monthly tab from 7 days before the delivery up to the delivery,
+ * or the one tab named in tabOpt.name (a store that keeps everything on one tab).
+ */
 function phloPickTabs(names, delivery, tabOpt) {
+  if (tabOpt.name) {
+    return names.filter(function (n) { return n.trim().toUpperCase() === tabOpt.name.toUpperCase(); });
+  }
   var wanted = [];
   [phloAddDays(delivery, -7), delivery].forEach(function (dt) {
     var key = dt.getUTCFullYear() + '-' + dt.getUTCMonth();
@@ -125,6 +131,14 @@ function phloMoney(text) {
   return '$' + (+m[1]).toFixed(2);
 }
 
+/** Bag count for NOTES 2: "4" -> "4 BAGS", "(3 BAGS/ 1 BOX)" -> "3 BAGS/ 1 BOX"; one bag is not noted. */
+function phloBags(text) {
+  var s = String(text || '').replace(/[()]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!s || /^\d{5,}$/.test(s)) return ''; // empty, or an RX number typed in the wrong column
+  if (/^\d+$/.test(s)) return +s > 1 ? s + ' BAGS' : '';
+  return s.toUpperCase();
+}
+
 function phloIsFridge(text) { return /^(YES|Y|1|TRUE|FRIDGE|REFRIG)/i.test(String(text || '').trim()); }
 
 /** Reads raw store rows into entries for delivery date D (no grouping yet). */
@@ -157,6 +171,10 @@ function phloExtract(values, store, delivery) {
     var ids = idText.match(/\d{5,}/g) || [];
     var na = addrText ? [nameText.replace(/[\s,]+$/, '').trim(), phloCleanAddress(addrText)] : phloSplitNameAddress(nameText);
     if (!na[0]) return;
+    if (store.nameNotes) { // "MOUNTAIN CREST ***DELIVER FROM 8AM TO 5PM ONLY***" -> note
+      var starNotes = [];
+      na[0] = na[0].replace(/\*{2,}\s*([^*]+?)\s*\*{2,}/g, function (_, t) { starNotes.push(t); return ' '; }).replace(/\s+/g, ' ').trim();
+    }
 
     var notesRaw = (c.notes || []).map(cell).filter(function (n) { return n.trim() !== ''; });
     var explicit = null;
@@ -168,6 +186,8 @@ function phloExtract(values, store, delivery) {
     var copayCell = c.copay !== undefined ? cell(c.copay) : '';
     entry.copay = phloMoney(copayCell);
     if (/PAID/i.test(copayCell)) entry.notes.push('PAID');
+    if (c.bags !== undefined) { var bags = phloBags(cell(c.bags)); if (bags) entry.notes.push(bags); }
+    if (starNotes) starNotes.forEach(function (t) { entry.notes.push(t); });
     if (c.fridge !== undefined && phloIsFridge(cell(c.fridge))) entry.fridge = true;
     notesRaw.forEach(function (n) {
       if (/\b(FRIDGE|REFRIG|REFREG)/i.test(n)) entry.fridge = true;
@@ -180,7 +200,7 @@ function phloExtract(values, store, delivery) {
 
     if (!ids.length) {
       // No RX number: a second patient written under the previous row (needs an address to count).
-      if (last && na[1]) last.extra.push(entry);
+      if (last && /\d/.test(na[1])) last.extra.push(entry);
       return;
     }
     if (store.onlyIf && !new RegExp(store.onlyIf.pattern, 'i').test(cell(store.onlyIf.col))) { last = null; return; }

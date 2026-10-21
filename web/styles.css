@@ -186,3 +186,31 @@ tr.flash td { animation: flash 1.6s ease-out; }
   .actions .btn { flex: 1; }
   .driver-form { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* past deliveries */
+h2 .pill:empty { display: none; }
+.history-lead { margin: 0 0 8px; padding: 8px 10px; border-radius: 7px; font-size: 14px; }
+.history-lead.warn { background: var(--warn-bg); color: var(--ink); }
+.history-lead.ok { background: var(--ok-bg); color: var(--ink); }
+#history-card .drop { padding: 14px; margin-bottom: 4px; }
+.history { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.hday { border-top: 1px solid var(--line); padding: 12px 0; }
+.hday-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.hday-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; flex: 1 1 220px; min-width: 0; }
+.hday-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.hp { font-size: 12px; font-weight: 500; border-radius: 99px; padding: 1px 8px; white-space: nowrap; }
+.hp.ok { background: var(--ok-bg); color: var(--ok); }
+.hp.bad { background: var(--error-bg); color: var(--error); }
+.hp.open { background: var(--warn-bg); color: var(--warn); }
+.small-btn { padding: 7px 10px; font-size: 13px; }
+.hday-routific { margin: 8px 0 0; font-size: 13px; padding: 6px 10px; border-radius: 7px; background: var(--info-bg); overflow-wrap: anywhere; }
+.hday-routific.warn { background: var(--warn-bg); }
+.hday-list { margin-top: 8px; font-size: 13px; }
+.hday-list summary { cursor: pointer; color: var(--muted); }
+.hday-list ul { list-style: none; margin: 6px 0 0; padding: 0; max-height: 320px; overflow: auto; display: grid; gap: 2px; }
+.hday-list li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 3px 4px; border-radius: 5px; }
+.hday-list li.missed { background: var(--error-bg); }
+.hday-list label { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.hday-list .tname { overflow-wrap: anywhere; }
+tr.carried td { background: var(--warn-bg); }
+.carry-tag { display: block; font-size: 11px; color: var(--warn); white-space: nowrap; }
