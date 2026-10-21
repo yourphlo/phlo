@@ -165,19 +165,32 @@ function phloParsePasted(text) {
 }
 
 /**
- * Pasted rows for a store with one tab per pickup day. Rows go on `pickup`; a line holding only a
- * date (like the tab name "Sat 10/17/26") starts another day, so two tabs can share one paste.
+ * Pasted cells for one store, ready for phloStoreRows. Every pasted row counts for this delivery
+ * (you paste the day you want), so the sheet's own dates and "PICK UP ON" lines are ignored. The
+ * store's columns shift to wherever the RX numbers are, so a copy that starts at column B, or a sheet
+ * with an extra column, still lines up.
+ * Returns {values, store, lines, rx, rxCol}: lines pasted, rows with an RX number, its column (0 = A).
  */
-function phloPastedValues(text, pickup, ref) {
-  var banner = function (d) { return ['PHLO PICK UP ON ' + phloFmt(d, 'MM/dd/yyyy')]; };
-  var values = [banner(pickup)];
-  phloParsePasted(text).forEach(function (row) {
-    var filled = row.filter(function (c) { return c.trim() !== ''; });
-    var day = filled.length === 1 && filled[0].trim().length <= 24 && !/\d{5,}/.test(filled[0]) ?
-      phloParseDate(filled[0], ref, true) : null;
-    values.push(day ? banner(day) : row);
+function phloPasted(text, store, delivery) {
+  var rows = phloParsePasted(text).filter(function (r) { return !/PICK\s*UP\s*ON/i.test(r.join(' ')); });
+  var counts = [];
+  rows.forEach(function (r) {
+    r.forEach(function (c, i) { if (/^\s*\d{5,}\s*(,|$)/.test(c)) counts[i] = (counts[i] || 0) + 1; });
   });
-  return values;
+  var rxCol = store.cols.id;
+  for (var i = 0; i < counts.length; i++) if ((counts[i] || 0) > (counts[rxCol] || 0)) rxCol = i;
+  var shift = function (c) { return c === undefined || c + rxCol - store.cols.id < 0 ? undefined : c + rxCol - store.cols.id; };
+  var cols = {};
+  Object.keys(store.cols).forEach(function (k) {
+    if (k === 'date') return; // pasted rows are all for this delivery
+    cols[k] = k === 'notes' ? store.cols.notes.map(shift).filter(function (c) { return c !== undefined; }) : shift(store.cols[k]);
+  });
+  var copy = {};
+  Object.keys(store).forEach(function (k) { copy[k] = store[k]; });
+  copy.cols = cols;
+  if (store.onlyIf) copy.onlyIf = { col: shift(store.onlyIf.col), pattern: store.onlyIf.pattern };
+  var banner = ['PHLO PICK UP ON ' + phloFmt(phloPickupDates(delivery)[0], 'MM/dd/yyyy')];
+  return { values: [banner].concat(rows), store: copy, lines: rows.length, rx: counts[rxCol] || 0, rxCol: rxCol };
 }
 
 /** Reads raw store rows into entries for delivery date D (no grouping yet). */
