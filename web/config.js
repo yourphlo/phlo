@@ -6,5 +6,5 @@ window.PHLO_CONFIG = {
   timeZone: 'America/Los_Angeles',
   // Google Maps API key for address suggestions on driver profiles (README > "Google Maps addresses").
   // Safe to publish once the key is limited to your website. Leave empty to type addresses by hand.
-  mapsApiKey: '',
+  mapsApiKey: 'AIzaSyAgKKj2E5yMTIntVmX6ZZttIBq770rx47M',
 };
