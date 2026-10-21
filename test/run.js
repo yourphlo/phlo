@@ -47,6 +47,23 @@ eq(ctx.phloStoreRows(fake, fakeStore, delivery), [
   ['1000003, 1000004,TWO,PAT, & THREE,PAT', '9 C AVE APT 4 TOWN CA 91000', 'TST', 'COMBO-FRIDGE'],
 ], 'date pick + combo + explicit later date skipped');
 
+// TX-style store: one fixed tab, date rows in the name column, bags column, ***notes*** in names.
+const txStore = { code: 'TX', tab: { name: 'PHLO' }, nameNotes: true, cols: { date: 2, id: 3, name: 2, address: 4, bags: 5, fridge: 6, notes: [7] } };
+eq(ctx.phloPickTabs(['10/20', 'PHLO', 'TEMPLATE', 'OCT 2026'], ctx.phloUtc(2026, 10, 21), txStore.tab), ['PHLO'], 'fixed tab name');
+eq(ctx.phloStoreRows([
+  ['', '', 'Collected', 'Log Number', 'PT Name & Address', '#OF BAGS'], ['', '', '10/19'],
+  ['', '', 'OLD HOME', '1000020', '1 A ST TOWN CA 91000', '1'],
+  ['', '', 'Collected', 'Log Number', 'PT Name & Address', '#OF BAGS'], ['', '', '10/20'],
+  ['', '', 'SUN HOME 2', '1000021, 1000022', '2 B AVE, TOWN, CA 91000', '4'],
+  ['', '', 'HILL CARE ***DELIVER 8AM TO 5PM***', '1000023', '3 C ST TOWN CA 91000', '(3 BAGS/ 1 BOX)', 'YES'],
+  ['', '', 'ONE BAG HOME', '1000024', '4 D ST TOWN CA 91000', '1'],
+  ['', '', 'Collected', 'Log Number', 'PT Name & Address', '#OF BAGS'],
+], txStore, ctx.phloUtc(2026, 10, 21)), [
+  ['1000021, 1000022,SUN HOME 2', '2 B AVE TOWN CA 91000', 'TX', '4 BAGS'],
+  ['1000023,HILL CARE', '3 C ST TOWN CA 91000', 'TX', 'FRIDGE-3 BAGS/ 1 BOX-DELIVER 8AM TO 5PM'],
+  ['1000024,ONE BAG HOME', '4 D ST TOWN CA 91000', 'TX', ''],
+], 'TX store');
+
 const checks = ctx.phloCheckRows([
   ['1000010, 1000011,V 1000012, A,B, & C,D', '600 BIRCH AVE APT 5 TOWN CA 91000', 'EM', ''],
   ['1000013,X,Y', '700 ASH AVE APT 1 TOWN CA 910002', 'WT DME', ''],
@@ -74,7 +91,10 @@ if (fs.existsSync(fixtures) && fs.existsSync(expectedFile)) {
   for (const store of ctx.STORES) {
     const file = path.join(fixtures, store.code.replace(' ', '_') + '.json');
     if (!fs.existsSync(file)) continue;
-    const rows = ctx.phloStoreRows(JSON.parse(fs.readFileSync(file, 'utf8')), store, delivery);
+    // A snapshot is either the rows, or {delivery: 'yyyy-mm-dd', values: rows} for a different date.
+    const snap = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const when = !Array.isArray(snap) && snap.delivery ? ctx.phloUtc(...snap.delivery.split('-').map(Number)) : delivery;
+    const rows = ctx.phloStoreRows(Array.isArray(snap) ? snap : snap.values, store, when);
     all.push(...rows);
     if (process.argv.includes('--print')) rows.forEach(r => console.log(r.join('  ||  ')));
     if (!expected[store.code]) continue;

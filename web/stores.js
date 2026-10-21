@@ -15,6 +15,9 @@ var MASTER_HEADERS = ['NAME', 'ADDRESS', 'NOTES', 'NOTES 2'];
  *   copay, fridge  optional
  *   notes   list of note columns, joined into NOTES 2
  * tab.prefix  only use monthly tabs whose name starts with this (e.g. RX / DME)
+ * tab.name    always read this one tab (no monthly tabs)
+ * bags        column with the number of bags ("4" -> "4 BAGS" in NOTES 2)
+ * nameNotes   move ***text*** in the name into NOTES 2
  * onlyIf      skip rows unless this column matches (SG lists other drivers too)
  * xlsx        the source is an .xlsx file in Drive, not a Google Sheet
  * search      find the file by name (newest match) instead of a fixed id
@@ -60,6 +63,10 @@ var STORES = [
     cols: { date: 0, id: 1, name: 2, address: 3, notes: [5, 6] } },
   { code: 'EM', title: '986 EM#8000 PHLO',
     id: '1MwxHnyDnKRRYZTmXD42Xm7V48C-wvmlsa1a5k-yYgkw',
-    cols: { date: 0, id: 1, name: 2, notes: [3] } }
+    cols: { date: 0, id: 1, name: 2, notes: [3] } },
+  // TX lists Phlo's care-home stops on its "PHLO" tab: a "10/20" row in column C starts each block.
+  { code: 'TX', title: 'TX DELIVERY 2026 (PHLO tab)',
+    id: '1XHk4mLQNIgWs6FHRFUTsgHOIaQ_09LxtM3MrUg96qqM', tab: { name: 'PHLO' }, nameNotes: true,
+    cols: { date: 2, id: 3, name: 2, address: 4, bags: 5, fridge: 6, notes: [7] } }
 ];
 

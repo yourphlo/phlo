@@ -102,7 +102,7 @@ For delivery date D:
 |---|---|
 | NAME | `RX#,LAST,FIRST`; patients at the same address become one combo row: `5147457, 5147468,RIVERA,GILBERTO, & AYALA,ISABEL` |
 | ADDRESS | Address with phone numbers, commas and `**...**` tags removed; ZIP+4 cut to 5 digits |
-| NOTES | Store code (VALLEY, LV, WT, WT DME, RM, ARC, TC, PDSN, WSTR, ARC2, BP, SG, EM) |
+| NOTES | Store code (VALLEY, LV, WT, WT DME, RM, ARC, TC, PDSN, WSTR, ARC2, BP, SG, EM, TX) |
 | NOTES 2 | `$copay-COMBO-FRIDGE-notes`, with delivery dates, `BAG 1 OF 2`, `WITH …` and arrows removed |
 
 ## Stores
@@ -117,6 +117,10 @@ name (`OCT 2026`, `October 2026`, `RX OCT 2026`, `OCT-2026`, …).
   name contains "BP" and "PHLO", one tab per day (`Mon 10/19/26`), the layout of the
   June file. Check its row count in the popup the first time it runs.
 - **SG** only takes rows marked `Phlo` (it also lists other drivers).
+- **TX** (TX DELIVERY 2026) only reads its **PHLO** tab, not the daily route tabs (those are
+  TX's own drivers). Each block starts with a date row like `10/20` and goes on the next day's
+  master. Rows are care homes: `RX#s,HOME NAME`, with the bag count in NOTES 2 (`3 BAGS`;
+  one bag is not noted).
 
 ## Tests
 
