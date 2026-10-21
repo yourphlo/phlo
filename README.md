@@ -70,11 +70,58 @@ When you're signed in, profiles are saved to your own Google account (a hidden a
 your Google Drive), so they show up on any computer once you sign in with the same account.
 Signed out, they are kept in that browser only and uploaded the next time you sign in.
 
-Patient data never leaves your browser and Google (driver addresses typed in the driver form go to
-Google Maps for suggestions): the page reads the sheets with your own
-Google sign-in and builds the file locally. Nothing is stored on GitHub.
+**App username and App PIN** (in the driver form): what the driver types to sign in to the driver
+app. The username is the first name unless you type another one; the PIN is 4 to 6 digits (6 is
+safer). The PIN is stored only scrambled, so it can't be shown again: type a new one to change it.
 
-Patient data is never saved in the browser or kept between visits. **Sign out** clears the page.
+### Dispatch
+
+The **Dispatch** tab turns the built master into one route per driver working that day (the ticks
+on the Drivers tab for the delivery date) and sends each driver their route.
+
+1. Build the master on the Master tab, then open **Dispatch** and click **Plan routes**. PHLO finds
+   every address on Google Maps, gives each stop to the driver whose coverage area it is in, then
+   orders each route by real driving time from the driver's start address (and back to their end
+   address, if they have one). Arrival times use the driver's hours, lunch break and speed, plus
+   **Minutes per stop**. **Start time** is used for drivers without an availability start.
+2. **Check before sending** lists what needs a look: addresses Google can't find (fix the address and
+   click **Find**), stops in two drivers' areas or in nobody's area (PHLO picked the nearest driver),
+   stops with a type (e.g. `FRIDGE`) no working driver has, drivers over capacity and stops reached
+   after a driver's hours. Click one to see it on the map.
+3. To move a stop, pick another driver in its **Driver** list (in the route list or by clicking it on
+   the map). Both routes are re-planned.
+4. **Print routes** prints one sheet per driver with boxes for the outcome, copay and a signature.
+5. **Send to drivers** sends the routes to the driver app. Sending again replaces the routes;
+   anything drivers already recorded is kept.
+6. **Deliveries** at the bottom shows each driver's progress live (refreshes every minute): delivered
+   or not, how it was left, who approved it, copay collected, notes, and the photo and signature.
+
+### Driver app
+
+Drivers open the same page on their phone (`https://yourphlo.github.io/phlo/`) and use
+**Driver sign-in** with their app username and PIN. They see only their own route: the stops in
+order with arrival times, notes and copay due, and a button that opens Google Maps directions to
+the next stop. At each stop they tap the stop and record:
+
+- **Delivered** or **Not delivered** (a reason is required),
+- **Left in mailbox**, **Left at front door** and/or **Approved by pharmacy staff** (with the name),
+- **Copay collected**, a **photo** and the patient's **signature**, and a note.
+
+They stay signed in on that phone for 16 hours. Five wrong PINs lock that username for 15 minutes.
+Removing a driver or their PIN signs them out.
+
+### Patient data
+
+The page reads the store sheets with your own Google sign-in and builds the master in the browser.
+Nothing is stored on GitHub. Patient addresses go to Google Maps when you plan routes (driver
+addresses go there too, for suggestions).
+
+Routes you send, and what drivers record (photos and signatures included), are saved in the
+**PHLO Dispatch** folder of the yourphlo Google Drive by the dispatch server (below), and stay there
+until you delete them. A free gmail.com account comes without a HIPAA agreement with Google
+(a BAA); a Google Workspace account can have one.
+
+Otherwise patient data is never saved in the browser or kept between visits. **Sign out** clears the page.
 (Older versions kept past deliveries in the browser; the page deletes that copy the first time it
 opens on that computer.) Downloaded `.xlsx` files
 are in your Downloads folder, so delete them there when you're done with them.
@@ -107,17 +154,25 @@ are in your Downloads folder, so delete them there when you're done with them.
 and push, or paste it into the setup box the first time you open the page (remembered in that
 browser).
 
-**4. Google Maps addresses (optional)** in the same Google Cloud project
+**4. Google Maps (address suggestions, coverage map, route planning)** in the same Google Cloud project
 
 1. Google Maps needs a billing account on the project (**Billing**). Address suggestions for a few
    drivers should stay within Google's free monthly usage, but set a budget alert to be safe.
-2. **APIs & Services > Library**: enable **Maps JavaScript API** and **Places API (New)**.
+2. **APIs & Services > Library**: enable **Maps JavaScript API**, **Places API (New)**,
+   **Geocoding API** and **Routes API** (the last two plan the routes).
 3. **APIs & Services > Credentials > Create credentials > API key**. Edit the key:
    - **Application restrictions: Websites**, add `https://yourphlo.github.io/*` (and
      `http://localhost:8000/*` for testing on a computer).
-   - **API restrictions: Restrict key** to Maps JavaScript API and Places API (New).
+   - **API restrictions: Restrict key** to Maps JavaScript API, Places API (New), Geocoding API and
+     Routes API.
+   Planning a day costs about half a cent per address and about a cent per driver; set a budget
+   alert under **Billing** to be safe.
 4. Paste the key into `web/config.js` (`mapsApiKey: '...'`) and push. A key limited to your website
    is meant to be in the page; it doesn't work from anywhere else.
+
+**5. Dispatch server (for the driver app)**: follow `apps-script-dispatch/README.md`, then put the
+web app URL in `web/config.js` (`dispatchUrl: '...'`) and push. Until then the Dispatch tab plans
+and prints routes, but can't send them, and drivers can't sign in.
 
 The first sign-in shows "Google hasn't verified this app" because it's your own private app;
 click **Continue**.
@@ -190,5 +245,8 @@ name (`OCT 2026`, `October 2026`, `RX OCT 2026`, `OCT-2026`, …).
 - `node test/run.js` - logic checks (run by GitHub Actions on every push), plus checks
   against local sheet snapshots in `test/fixtures/` when present (kept out of git because
   they hold patient data).
+- `node test/dispatch-e2e.js [screenshot-dir]` - plans, prints and sends routes, then signs in as a
+  driver and records a delivery, in Chromium with Google and the dispatch server faked (the real
+  `Server.gs` runs on stand-ins for Apps Script; needs Playwright).
 - `XLSX_JS=path/to/xlsx.full.min.js node test/e2e.js [file.xlsx]` - drives the web app in
   Chromium with Google's APIs faked from those snapshots (needs Playwright).

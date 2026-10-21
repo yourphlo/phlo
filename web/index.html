@@ -19,6 +19,7 @@
     </div>
     <div class="account">
       <span id="who" class="muted"></span>
+      <button id="driver-signout" class="btn ghost" hidden>Sign out</button>
       <button id="signin" class="btn">Sign in with Google</button>
       <button id="signout" class="btn ghost" hidden>Sign out</button>
     </div>
@@ -26,6 +27,7 @@
 
   <nav id="tabs" class="tabs" aria-label="Sections" hidden>
     <button class="tab" data-view="master" aria-current="page">Master</button>
+    <button class="tab" data-view="dispatch">Dispatch</button>
     <button class="tab" data-view="drivers">Drivers <span id="drivers-tab-count" class="pill"></span></button>
   </nav>
 
@@ -44,7 +46,34 @@
       <h2>Sign in to use PHLO</h2>
       <p class="muted">Only the PHLO Google account can open the master and driver pages.</p>
       <button id="signin-main" class="btn primary">Sign in with Google</button>
+      <form id="driver-login" class="driver-login" hidden novalidate>
+        <h3>Drivers</h3>
+        <p class="muted small">Sign in with your name and the PIN the office gave you.</p>
+        <label class="field">Name
+          <input name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+        </label>
+        <label class="field">PIN
+          <input name="pin" type="password" autocomplete="current-password" inputmode="numeric" maxlength="6" required>
+        </label>
+        <p id="driver-login-error" class="form-errors" hidden></p>
+        <button type="submit" class="btn primary">Driver sign-in</button>
+      </form>
     </section>
+
+    <div id="view-driver" class="view" hidden>
+      <section class="card dv-head">
+        <div>
+          <h2 id="dv-title">Your route</h2>
+          <p id="dv-sub" class="muted small"></p>
+        </div>
+        <div class="dv-progress"><div id="dv-bar"></div></div>
+        <div class="actions">
+          <a id="dv-next" class="btn primary" target="_blank" rel="noopener" hidden>Navigate to next stop</a>
+          <button type="button" id="dv-refresh" class="btn ghost">Refresh</button>
+        </div>
+      </section>
+      <ol id="dv-stops" class="dv-stops"></ol>
+    </div>
 
     <div id="view-master" class="view" hidden>
     <section class="card controls">
@@ -102,6 +131,54 @@
     </section>
     </div>
 
+    <div id="view-dispatch" class="view" hidden>
+      <section class="card controls">
+        <div class="dp-what">
+          <b id="dp-date"></b>
+          <span id="dp-summary" class="muted small"></span>
+        </div>
+        <label class="field">Start time
+          <input id="dp-start" type="time" value="09:00">
+        </label>
+        <label class="field">Minutes per stop
+          <input id="dp-service" type="number" min="0" max="60" step="1" value="4">
+        </label>
+        <div class="actions">
+          <button id="dp-plan" class="btn primary">Plan routes</button>
+          <button id="dp-print" class="btn" disabled>Print routes</button>
+          <button id="dp-send" class="btn" disabled>Send to drivers</button>
+        </div>
+        <p id="dp-note" class="muted small dp-note"></p>
+      </section>
+
+      <section id="dp-flags-card" class="card" hidden>
+        <h2>Check before sending <span id="dp-flags-count" class="pill"></span></h2>
+        <ul id="dp-flags" class="checks"></ul>
+      </section>
+
+      <section id="dp-map-card" class="card" hidden>
+        <div class="cov-map-wrap"><div id="dp-map" class="cov-map"></div></div>
+      </section>
+
+      <section id="dp-routes-card" class="card" hidden>
+        <h2>Routes <span id="dp-routes-count" class="pill"></span></h2>
+        <p class="muted small">Start and finish times use the driver's hours, lunch break and speed. Pick another driver in a stop's list to move it.</p>
+        <div id="dp-routes" class="dp-routes"></div>
+      </section>
+
+      <section id="dp-live-card" class="card" hidden>
+        <div class="table-head">
+          <h2>Deliveries <span id="dp-live-count" class="pill"></span></h2>
+          <div class="actions">
+            <input id="dp-live-date" type="date" aria-label="Delivery date to show">
+            <button type="button" id="dp-live-refresh" class="btn ghost">Refresh</button>
+          </div>
+        </div>
+        <p id="dp-live-note" class="muted small"></p>
+        <div id="dp-live"></div>
+      </section>
+    </div>
+
     <div id="view-drivers" class="view" hidden>
       <section class="card controls">
         <label class="field">Working on
@@ -150,6 +227,12 @@
             <input name="types" autocomplete="off" placeholder="e.g. FRIDGE, DME">
           </label>
           <div id="types-preview" class="chips wide"></div>
+          <label class="field"><span>App username <span class="muted">(signs in to the driver app)</span></span>
+            <input name="username" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="First name">
+          </label>
+          <label class="field"><span>App PIN <span class="muted">(4 to 6 digits)</span></span>
+            <input name="pin" autocomplete="new-password" inputmode="numeric" maxlength="6" placeholder="Set a PIN">
+          </label>
           <fieldset class="field wide speed">
             <legend>Driving Speed</legend>
             <label><input type="radio" name="speed" value="SLOW"> SLOW (10%)</label>
@@ -198,6 +281,60 @@
     </div>
   </main>
 
+  <dialog id="dv-stop" class="sheet" aria-labelledby="dv-stop-title">
+    <form id="dv-form" method="dialog" novalidate>
+      <div class="sheet-head">
+        <h2 id="dv-stop-title"></h2>
+        <button type="button" class="del" id="dv-close" aria-label="Close">&times;</button>
+      </div>
+      <p id="dv-stop-address" class="dv-address"></p>
+      <div id="dv-stop-meta" class="chips"></div>
+      <a id="dv-nav" class="btn primary wide-btn" target="_blank" rel="noopener">Navigate</a>
+      <fieldset class="seg" id="dv-status">
+        <legend>Outcome</legend>
+        <label><input type="radio" name="status" value="delivered"> Delivered</label>
+        <label><input type="radio" name="status" value="failed"> Not delivered</label>
+      </fieldset>
+      <fieldset class="checks-col">
+        <legend>How</legend>
+        <label><input type="checkbox" name="methods" value="mailbox"> Left in mailbox</label>
+        <label><input type="checkbox" name="methods" value="door"> Left at front door</label>
+        <label><input type="checkbox" name="methods" value="approved"> Approved by pharmacy staff</label>
+        <input name="approvedBy" placeholder="Name of pharmacy staff" autocomplete="off" hidden>
+      </fieldset>
+      <label class="field" id="dv-copay-field">Copay collected
+        <input name="copayCollected" inputmode="decimal" autocomplete="off" placeholder="0.00">
+      </label>
+      <div class="field">
+        <span>Photo</span>
+        <div class="photo-row">
+          <label class="btn"><input id="dv-photo" type="file" accept="image/*" capture="environment" hidden> Take photo</label>
+          <img id="dv-photo-preview" alt="Delivery photo" hidden>
+        </div>
+      </div>
+      <div class="field">
+        <span>Signature <button type="button" id="dv-sig-clear" class="linkish">Clear</button></span>
+        <canvas id="dv-sig" class="sig" aria-label="Signature pad: sign with your finger"></canvas>
+        <img id="dv-sig-saved" class="sig" alt="Saved signature" hidden>
+      </div>
+      <label class="field">Note
+        <textarea name="note" rows="2" placeholder="Anything the office should know"></textarea>
+      </label>
+      <ul id="dv-errors" class="form-errors" hidden></ul>
+      <div class="actions">
+        <button type="submit" id="dv-save" class="btn primary">Save</button>
+        <button type="button" id="dv-cancel" class="btn ghost">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="img-dialog" class="sheet img-sheet">
+    <form method="dialog"><div class="sheet-head"><h2 id="img-title"></h2><button class="del" aria-label="Close">&times;</button></div>
+      <img id="img-full" alt=""></form>
+  </dialog>
+
+  <div id="print-area" class="print-area"></div>
+
   <div id="toast" class="toast" role="status" hidden></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -206,7 +343,11 @@
   <script src="stores.js"></script>
   <script src="core.js"></script>
   <script src="drivers.js"></script>
+  <script src="dispatch.js"></script>
+  <script src="backend.js"></script>
   <script src="maps.js"></script>
   <script src="app.js"></script>
+  <script src="dispatch-ui.js"></script>
+  <script src="driver.js"></script>
 </body>
 </html>

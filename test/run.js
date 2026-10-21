@@ -1,4 +1,4 @@
-// Tests for the shared PHLO logic (web/core.js + web/stores.js + web/drivers.js).
+// Tests for the shared PHLO logic (web/core.js + web/stores.js + web/drivers.js + web/dispatch.js).
 //   node test/run.js            unit checks, plus sheet-snapshot checks if test/fixtures/ exists
 //   node test/run.js --print    also print the rows built from the snapshots
 // The snapshots hold patient data, so they stay local (see .gitignore); CI runs the unit checks only.
@@ -10,7 +10,7 @@ const { execFileSync } = require('child_process');
 const root = path.join(__dirname, '..');
 const ctx = {};
 vm.createContext(ctx);
-for (const f of ['web/stores.js', 'web/core.js', 'web/drivers.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
+for (const f of ['web/stores.js', 'web/core.js', 'web/drivers.js', 'web/dispatch.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
 
 let failures = 0;
 const eq = (a, b, msg) => {
@@ -147,6 +147,84 @@ const gj = ctx.phloAreasGeoJson([withAreas, ctx.phloNormalizeDriver({ id: 'y', n
 eq(gj.features.length, 1, 'geojson skips drivers with no areas');
 eq([gj.features[0].properties.driver, gj.features[0].geometry.coordinates], ['Z', [[[[-118, 34], [-118, 34.1], [-118.1, 34.1], [-118, 34]]]]], 'geojson is lng,lat and closed');
 eq(ctx.phloDriverRows([withAreas])[0].length, 11, 'areas not in the drivers export');
+const app1 = ctx.phloNormalizeDriver({ id: 'u1', name: 'Ana Ruiz', startAddress: 'x', pinSalt: 'abcdef0123456789', pinHash: 'a'.repeat(64) });
+const app2 = ctx.phloNormalizeDriver({ id: 'u2', name: 'Ana Lee', startAddress: 'x' });
+eq([app1.username, ctx.phloLoginName(app1), app1.pinHash.length, ctx.phloNormalizeDriver({ name: 'x', pinHash: 'nothex' }).pinHash], ['', 'ana', 64, ''], 'app login fields');
+eq(ctx.phloValidateDriver(app2, [app1], '12').map(e => e.field), ['username', 'pin'], 'app username clash + bad pin');
+eq(ctx.phloValidateDriver(ctx.phloNormalizeDriver({ id: 'u2', name: 'Ana Lee', startAddress: 'x', username: 'Ana L' }), [app1], '123456'), [], 'own app username ok');
+
+/* ---------- dispatch ---------- */
+eq([ctx.phloGeocodeQuality(['street_address']), ctx.phloGeocodeQuality(['premise'], true), ctx.phloGeocodeQuality(['route']), ctx.phloGeocodeQuality(['country', 'political']), ctx.phloGeocodeQuality(['postal_code'])], ['ok', 'partial', 'partial', 'none', 'none'], 'geocode quality');
+eq([ctx.phloClock('09:05'), ctx.phloClock('13:30'), ctx.phloClock('00:10'), ctx.phloClock('12:00')], ['9:05 AM', '1:30 PM', '12:10 AM', '12:00 PM'], 'clock');
+eq(Math.round(ctx.phloKm({ lat: 34, lng: -118 }, { lat: 35, lng: -118 })), 111, 'km per degree of latitude');
+const sq = [[34, -118], [34, -117.9], [34.1, -117.9], [34.1, -118]];
+eq([ctx.phloInArea({ lat: 34.05, lng: -117.95 }, sq), ctx.phloInArea({ lat: 34.2, lng: -117.95 }, sq)], [true, false], 'point in area');
+eq([ctx.phloStopId(['1234567,DOE,JANE', 'x']), ctx.phloStopId(['1234567 & 7654321,DOE', 'x']), ctx.phloStopId(['DOE', '1 A St']) === ctx.phloStopId(['DOE', '1 A St'])], ['rx1234567', 'rx1234567_7654321', true], 'stop ids');
+eq(ctx.phloStopInfo(['n', 'a', 'EM', '$1.60-$2.00-COMBO-FRIDGE-PAID']), { store: 'EM', copay: '$3.60', tags: ['COMBO', 'FRIDGE', 'PAID'] }, 'stop info');
+// Assignment: A covers the west square, B the east square, they overlap in the middle; C has FRIDGE.
+const west = [[34, -118.2], [34, -118], [34.1, -118], [34.1, -118.2]], east = [[34, -118.05], [34, -117.8], [34.1, -117.8], [34.1, -118.05]];
+const ds = [{ id: 'A', areas: [west], types: [], start: { lat: 34.05, lng: -118.15 } }, { id: 'B', areas: [east], types: [], start: { lat: 34.05, lng: -117.85 }, capacity: 1 },
+  { id: 'C', areas: [], types: ['FRIDGE'], start: { lat: 34.3, lng: -118 } }];
+const asg = ctx.phloAssignStops([
+  { id: 'w', lat: 34.05, lng: -118.15, tags: [] }, { id: 'e', lat: 34.05, lng: -117.85, tags: [] },
+  { id: 'mid', lat: 34.05, lng: -118.02, tags: [] }, { id: 'far', lat: 34.5, lng: -118.15, tags: [] },
+  { id: 'cold', lat: 34.05, lng: -118.15, tags: ['FRIDGE'] }, { id: 'lost', lat: null, lng: null, tags: [] },
+  { id: 'hand', lat: 34.05, lng: -118.15, tags: [], driverId: 'B' }], ds);
+eq(Object.keys(asg).map(k => k + ':' + asg[k].driverId + ':' + asg[k].flags.join('+')),
+  ['w:A:', 'e:B:', 'lost:null:notFound', 'hand:B:manual', 'mid:A:overlap', 'far:C:outside', 'cold:C:outside'], 'assign stops (B is full, so the overlap goes to A; far goes to the nearest start)');
+// Ordering: points on a line visited in line order.
+const line = [{ lat: 34, lng: -118.3 }, { lat: 34, lng: -118.1 }, { lat: 34, lng: -118.4 }, { lat: 34, lng: -118.2 }];
+eq(ctx.phloOrderStops(line, { lat: 34, lng: -118 }, null), [1, 3, 0, 2], 'order from start');
+eq(ctx.phloOrderStops(line, { lat: 34, lng: -118 }, { lat: 34, lng: -118 }).length, 4, 'order with end');
+eq(ctx.phloOrderStops([{ lat: 1, lng: 1 }], null, null), [0], 'single stop');
+const box = []; for (let i = 0; i < 30; i++) box.push({ lat: 34 + ((i * 7) % 10) / 100, lng: -118 + ((i * 3) % 10) / 100 });
+const ord = ctx.phloOrderStops(box, { lat: 34, lng: -118 }, null);
+eq(ord.slice().sort((a, b) => a - b), box.map((p, i) => i), 'order visits every stop once');
+const routeLen = o => o.reduce((t, k, i) => t + ctx.phloEstMin(i ? box[o[i - 1]] : { lat: 34, lng: -118 }, box[k]), 0);
+eq(routeLen(ord) < routeLen(box.map((p, i) => i)) * 0.7, true, 'ordered route is much shorter than list order');
+eq(JSON.parse(JSON.stringify(ctx.phloRouteSegments(3, true))), [{ from: -1, via: [0, 1, 2], to: 'end' }], 'segments with end');
+eq(JSON.parse(JSON.stringify(ctx.phloRouteSegments(3, false))), [{ from: -1, via: [0, 1], to: 2 }], 'segments without end');
+eq(JSON.parse(JSON.stringify(ctx.phloRouteSegments(7, false, 2))).map(s => [s.from, s.via.join(''), s.to]), [[-1, '01', 2], [2, '34', 5], [5, '', 6]], 'long route split');
+eq(JSON.parse(JSON.stringify(ctx.phloRouteSegments(6, true, 2))).map(s => [s.from, s.via.join(''), s.to]), [[-1, '01', 2], [2, '34', 5], [5, '', 'end']], 'long route split with end');
+const sch = ctx.phloSchedule([10, 20, 30, 15], 3, { availableFrom: '11:30', availableTo: '12:45', lunchFrom: '12:00', lunchTo: '12:30', speed: 'NORMAL' }, { serviceMin: 5 });
+eq([sch.etas, sch.finish, sch.driveMin, sch.late, sch.lunchBefore], [['11:40', '12:35', '13:10'], '13:30', 75, [2], 1], 'schedule with lunch and late stop');
+eq(ctx.phloSchedule([10, 10], 2, { speed: 'SLOW' }, { serviceMin: 0, dayStart: '08:00' }).etas, ['08:12', '08:23'], 'slow driver');
+eq(JSON.parse(JSON.stringify(ctx.phloDecodePolyline('_p~iF~ps|U_ulLnnqC_mqNvxq`@'))), [{ lat: 38.5, lng: -120.2 }, { lat: 40.7, lng: -120.95 }, { lat: 43.252, lng: -126.453 }], 'decode polyline');
+eq([ctx.phloUsername(' Ana  Maria'), ctx.phloUsername("O'Neil")], ['ana', 'oneil'], 'usernames');
+eq(ctx.phloNavUrl({ lat: 34.1, lng: -118.2 }), 'https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=34.1,-118.2', 'nav link');
+eq([ctx.phloCheckUpdate({ status: 'delivered', methods: ['door'] }).length, ctx.phloCheckUpdate({ status: 'delivered', methods: ['approved'] }).length,
+  ctx.phloCheckUpdate({ status: 'failed' }).length, ctx.phloCheckUpdate({ status: 'delivered', copayCollected: '5.5' }).length, ctx.phloCheckUpdate({}).length], [0, 1, 1, 0, 1], 'stop update checks');
+
+/* ---------- dispatch server (apps-script-dispatch/Server.gs) ---------- */
+{
+  const srv = require('./fake-apps-script')({ adminTokens: { good: 'yourphlo@gmail.com', other: 'someone@gmail.com' } });
+  const sha = (salt, pin) => require('crypto').createHash('sha256').update(salt + ':' + pin).digest('hex');
+  eq(srv.post({ action: 'admin.syncDrivers', googleToken: 'other', drivers: [] }).error, 'This Google account cannot send routes.', 'server: only admins');
+  eq(srv.post({ action: 'admin.syncDrivers', googleToken: 'good', drivers: [
+    { id: 'a', name: 'Ana Ruiz', username: 'ana', salt: 's1', hash: sha('s1', '4321') }, { id: 'b', name: 'Bo', username: 'bo', salt: 's2', hash: sha('s2', '1111') }] }).accounts, 2, 'server: sync drivers');
+  eq(srv.post({ action: 'driver.login', username: 'Ana', pin: '0000' }).error, 'Wrong name or PIN.', 'server: wrong pin');
+  const login = srv.post({ action: 'driver.login', username: 'Ana', pin: '4321' });
+  eq([login.ok, login.name, login.session.length], [true, 'Ana Ruiz', 64], 'server: login');
+  for (let i = 0; i < 5; i++) srv.post({ action: 'driver.login', username: 'bo', pin: '9' });
+  eq(srv.post({ action: 'driver.login', username: 'bo', pin: '1111' }).error, 'Too many wrong tries. Wait 15 minutes and try again.', 'server: lockout');
+  const stop = (id, seq) => ({ id, seq, name: id + ',DOE', address: '1 A St', lat: 34, lng: -118, eta: '09:10' });
+  eq(srv.post({ action: 'admin.publish', googleToken: 'good', date: '2026-10-22', routes: [
+    { driverId: 'a', driverName: 'Ana Ruiz', stops: [stop('rx1', 1), stop('rx2', 2)] }, { driverId: 'b', driverName: 'Bo', stops: [stop('rx3', 1)] }] }).routes, 2, 'server: publish');
+  const mine = srv.post({ action: 'driver.route', session: login.session });
+  eq([mine.date, mine.route.stops.map(s => s.id)], ['2026-10-22', ['rx1', 'rx2']], 'server: driver sees only their next route');
+  eq(srv.post({ action: 'driver.update', session: login.session, date: '2026-10-22', stopId: 'rx3', update: { status: 'delivered' } }).error, 'That stop is not on your route.', 'server: no updates to other routes');
+  const png = 'data:image/png;base64,' + Buffer.from('fakepng').toString('base64');
+  const up = srv.post({ action: 'driver.update', session: login.session, date: '2026-10-22', stopId: 'rx1',
+    update: { status: 'delivered', methods: ['approved', 'bogus'], approvedBy: 'Kim', copayCollected: '5.00', signature: png } });
+  eq([up.update.methods, up.update.approvedBy, !!up.update.signatureId, up.update.photoId], [['approved'], 'Kim', true, ''], 'server: save update');
+  eq(srv.post({ action: 'driver.file', session: login.session, date: '2026-10-22', fileId: up.update.signatureId }).dataUrl, png, 'server: driver reads own file');
+  const st = srv.post({ action: 'admin.status', googleToken: 'good', date: '2026-10-22' });
+  eq([st.plan.routes.length, Object.keys(st.updates)], [2, ['rx1']], 'server: admin status');
+  eq(srv.post({ action: 'admin.file', googleToken: 'good', fileId: up.update.signatureId }).dataUrl, png, 'server: admin reads file');
+  srv.post({ action: 'admin.syncDrivers', googleToken: 'good', drivers: [{ id: 'b', name: 'Bo', username: 'bo', salt: 's2', hash: sha('s2', '1111') }] });
+  eq(srv.post({ action: 'driver.route', session: login.session }).error, 'Please sign in again.', 'server: removed driver is signed out');
+  eq(srv.post('not json').error, 'Bad request.', 'server: bad request');
+}
 
 try { execFileSync('node', [path.join(root, 'scripts/sync-apps-script.js'), '--check'], { stdio: 'inherit' }); }
 catch (e) { failures++; }

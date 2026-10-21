@@ -39,6 +39,12 @@ function phloParseTime(v) {
   return (h < 10 ? '0' : '') + h + ':' + (min < 10 ? '0' : '') + min;
 }
 
+/** "Ana Maria Ruiz" -> "ana": a sign-in name for the driver app (lowercase letters and digits). */
+function phloUsername(v) { return phloCleanText(v).split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, ''); }
+
+/** The name a driver signs in to the driver app with: their own username, else their first name. */
+function phloLoginName(d) { return d.username || phloUsername(d.name); }
+
 function phloMinutes(t) { var p = t.split(':'); return +p[0] * 60 + +p[1]; }
 
 /** A Google Maps pin for an address: {address, lat, lng, placeId}. Kept only while it still matches
@@ -79,13 +85,17 @@ function phloNormalizeDriver(d) {
     speed: DRIVER_SPEEDS.some(function (s) { return s.value === speed; }) ? speed : 'NORMAL',
     lunchFrom: time(d.lunchFrom),
     lunchTo: time(d.lunchTo),
+    username: phloCleanText(d.username).toLowerCase().replace(/[^a-z0-9]/g, ''),
+    pinSalt: /^[0-9a-f]{8,64}$/.test(d.pinSalt || '') ? d.pinSalt : '',
+    pinHash: /^[0-9a-f]{64}$/.test(d.pinHash || '') ? d.pinHash : '',
     areas: phloNormalizeAreas(d.areas),
     color: /^#[0-9a-f]{6}$/i.test(d.color || '') ? d.color.toLowerCase() : ''
   };
 }
 
-/** Problems that stop a driver from being saved: [{field, message}]. `others` = the other saved drivers. */
-function phloValidateDriver(d, others) {
+/** Problems that stop a driver from being saved: [{field, message}]. `others` = the other saved drivers.
+ * `pin` = a new driver app PIN typed in the form ('' = keep the current one). */
+function phloValidateDriver(d, others, pin) {
   var errs = [];
   var add = function (field, message) { errs.push({ field: field, message: message }); };
   if (!d.name) add('name', 'Driver name is required.');
@@ -93,6 +103,10 @@ function phloValidateDriver(d, others) {
     add('name', 'Another driver is already called "' + d.name + '".');
   }
   if (!d.startAddress) add('startAddress', 'Start address is required.');
+  var login = phloLoginName(d);
+  var clash = login && !errs.some(function (e) { return e.field === 'name'; }) && (others || []).filter(function (o) { return o.id !== d.id && phloLoginName(o) === login; })[0];
+  if (clash) add('username', clash.name + ' already signs in to the driver app as "' + login + '". Give this driver another app username.');
+  if (pin && !/^\d{4,6}$/.test(pin)) add('pin', 'The app PIN must be 4 to 6 digits.');
 
   // needBoth: false lets one side stay empty (availability can be just a start or just an end time).
   var pair = function (from, to, label, needBoth) {

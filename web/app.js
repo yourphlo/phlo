@@ -318,6 +318,7 @@
       $('build').disabled = false;
       $('compare-card').hidden = false;
       toast('Built ' + state.rows.length + ' rows for ' + niceDate(delivery));
+      document.dispatchEvent(new CustomEvent('phlo:rows'));
     });
   }
 
@@ -514,6 +515,7 @@
       }
     }).then(function () {
       renderDrivers();
+      syncAccounts();
     }).catch(function (e) {
       renderSyncNote('Could not load drivers from Google (' + e.message + '). Changes are kept on this device for now.');
     });
@@ -559,7 +561,20 @@
     saveLocalDrivers();
     drv.synced = false;
     renderDrivers();
-    if (signedIn()) pushDrivers();
+    if (signedIn()) { pushDrivers(); syncAccounts(); }
+  }
+
+  /** Sends driver app logins (username + hashed PIN) to the dispatch server, a moment after the last change. */
+  var syncTimer = null;
+  function syncAccounts() {
+    if (!phloBackend.enabled) return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(function () {
+      if (!signedIn()) return;
+      phloBackend.call('admin.syncDrivers', { googleToken: state.token, drivers: drv.data.drivers.map(function (d) {
+        return { id: d.id, name: d.name, username: phloLoginName(d), salt: d.pinSalt, hash: d.pinHash };
+      }) }).catch(function (e) { toast('Could not update driver app logins: ' + e.message); });
+    }, 800);
   }
 
   function renderSyncNote(msg) {
@@ -605,6 +620,7 @@
       part2('Speed', d.speed !== 'NORMAL' ? d.speed : '');
       part2('Mobile', d.mobile);
       part2('Areas', d.areas.length ? String(d.areas.length) : '');
+      part2('App', phloLoginName(d) + (d.pinHash ? '' : ' (no PIN yet)'));
       var line2 = el('div', { class: 'dmeta' });
       meta2.forEach(function (n, i) { if (i) line2.appendChild(document.createTextNode(' · ')); line2.appendChild(n); });
       var chips = el('div', { class: 'chips' }, d.types.map(function (t) { return el('span', { class: 'chip', text: t }); }));
@@ -622,6 +638,7 @@
     $('download-drivers').disabled = !working.length;
     renderSyncNote();
     renderCoverage();
+    document.dispatchEvent(new CustomEvent('phlo:drivers'));
   }
 
   function toggleWorking(id, on) {
@@ -669,7 +686,7 @@
     note.appendChild(el('a', { href: phloMapsUrl(address, pin), target: '_blank', rel: 'noopener', text: 'Open in Google Maps' }));
   }
 
-  var FORM_FIELDS = ['name', 'startAddress', 'endAddress', 'availableFrom', 'availableTo', 'mobile', 'capacity', 'types', 'lunchFrom', 'lunchTo'];
+  var FORM_FIELDS = ['name', 'startAddress', 'endAddress', 'availableFrom', 'availableTo', 'mobile', 'capacity', 'types', 'lunchFrom', 'lunchTo', 'username'];
 
   function openDriverForm(d) {
     var f = $('driver-form');
@@ -683,12 +700,28 @@
     Object.keys(PIN_KEYS).forEach(function (k) { formPins[k] = d ? d[PIN_KEYS[k]] : null; renderPinNote(k); });
     var speed = d ? d.speed : 'NORMAL';
     Array.prototype.forEach.call(f.elements.speed, function (r) { r.checked = r.value === speed; });
+    f.elements.pin.value = '';
+    f.elements.pin.removeAttribute('aria-invalid');
+    f.elements.pin.placeholder = d && d.pinHash ? 'PIN is set: type a new one to change it' : 'Set a PIN';
+    renderUsernameHint();
     $('driver-form-title').textContent = d ? 'Edit ' + d.name : 'Add driver';
     $('driver-errors').hidden = true;
     renderTypesPreview();
     $('driver-form-card').hidden = false;
     $('driver-form-card').scrollIntoView({ block: 'start', behavior: 'smooth' });
     f.elements.name.focus({ preventScroll: true });
+  }
+
+  function renderUsernameHint() {
+    var f = $('driver-form');
+    f.elements.username.placeholder = phloUsername(f.elements.name.value) || 'First name';
+  }
+
+  /** SHA-256 of salt:pin as hex (the dispatch server checks PINs the same way). */
+  function hashPin(salt, pin) {
+    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(salt + ':' + pin)).then(function (buf) {
+      return Array.prototype.map.call(new Uint8Array(buf), function (b) { return (b < 16 ? '0' : '') + b.toString(16); }).join('');
+    });
   }
 
   function closeDriverForm() {
@@ -715,9 +748,12 @@
     var current = drv.editing && drv.data.drivers.filter(function (x) { return x.id === drv.editing.id; })[0];
     raw.areas = current ? current.areas : [];
     raw.color = current ? current.color : '';
+    raw.pinSalt = current ? current.pinSalt : '';
+    raw.pinHash = current ? current.pinHash : '';
     var d = phloNormalizeDriver(raw);
-    var errs = phloValidateDriver(d, drv.data.drivers);
-    FORM_FIELDS.forEach(function (k) { f.elements[k].removeAttribute('aria-invalid'); });
+    var pin = f.elements.pin.value.trim();
+    var errs = phloValidateDriver(d, drv.data.drivers, pin);
+    FORM_FIELDS.concat(['pin']).forEach(function (k) { f.elements[k].removeAttribute('aria-invalid'); });
     var box = $('driver-errors');
     if (errs.length) {
       box.textContent = '';
@@ -730,7 +766,16 @@
       if (first && first.focus) first.focus();
       return;
     }
-    var isNew = !drv.editing;
+    if (pin) {
+      var salt = Array.prototype.map.call(crypto.getRandomValues(new Uint8Array(8)), function (b) { return (b < 16 ? '0' : '') + b.toString(16); }).join('');
+      hashPin(salt, pin).then(function (h) { d.pinSalt = salt; d.pinHash = h; storeDriver(d); });
+      return;
+    }
+    storeDriver(d);
+  }
+
+  function storeDriver(d) {
+    var isNew = !drv.editing || !drv.data.drivers.some(function (x) { return x.id === d.id; });
     if (isNew) {
       drv.data.drivers.push(d);
       // A new driver works on the date being viewed.
@@ -957,16 +1002,33 @@
     setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
   }
 
+  var VIEWS = ['master', 'dispatch', 'drivers'];
+
+  // What the Dispatch tab (dispatch-ui.js) needs from this file.
+  var PHLO = window.PHLO = {
+    el: el, toast: toast, niceDate: niceDate, fromIso: fromIso, isoDate: isoDate, todayLocal: todayLocal,
+    token: function () { return signedIn() ? state.token : null; },
+    signIn: signIn,
+    rows: function () { return state.rows; },
+    deliveryIso: function () { return state.built ? isoDate(state.built.delivery) : $('date').value; },
+    built: function () { return !!state.built; },
+    drivers: function () { return drv.data.drivers; },
+    rosterFor: function (iso) { return phloRosterFor(drv.data, iso); },
+    colors: function () { return phloDriverColors(drv.data.drivers); },
+    view: function () { return state.view; },
+    onShow: {}
+  };
+
   // Nothing is shown until an allowed account signs in.
   function showView(name) {
     state.view = name;
-    if (!state.session) { $('view-master').hidden = $('view-drivers').hidden = true; return; }
+    if (!state.session) { VIEWS.forEach(function (v) { $('view-' + v).hidden = true; }); return; }
     document.querySelectorAll('.tab').forEach(function (t) {
       if (t.getAttribute('data-view') === name) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
     });
-    $('view-master').hidden = name !== 'master';
-    $('view-drivers').hidden = name !== 'drivers';
+    VIEWS.forEach(function (v) { $('view-' + v).hidden = name !== v; });
     if (name === 'drivers') ensureMap();
+    if (PHLO.onShow[name]) PHLO.onShow[name]();
     try { localStorage.setItem('phlo.view', name); } catch (e) { /* storage blocked */ }
   }
 
@@ -1011,7 +1073,7 @@
       t.addEventListener('click', function () { showView(t.getAttribute('data-view')); });
     });
     var view = 'master';
-    try { view = localStorage.getItem('phlo.view') === 'drivers' ? 'drivers' : 'master'; } catch (e) { /* storage blocked */ }
+    try { var saved = localStorage.getItem('phlo.view'); if (VIEWS.indexOf(saved) >= 0) view = saved; } catch (e) { /* storage blocked */ }
     showView(view);
     $('roster-date').value = isoDate(phloAddDays(todayLocal(), 1));
     $('roster-date').addEventListener('change', renderDrivers);
@@ -1019,6 +1081,7 @@
     $('cancel-driver').addEventListener('click', closeDriverForm);
     $('driver-form').addEventListener('submit', saveDriverForm);
     $('driver-form').elements.types.addEventListener('input', renderTypesPreview);
+    $('driver-form').elements.name.addEventListener('input', renderUsernameHint);
     phloMaps.onError = toast;
     Object.keys(PIN_KEYS).forEach(function (k) {
       var input = $('driver-form').elements[k];
