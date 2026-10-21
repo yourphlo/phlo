@@ -151,6 +151,13 @@ async function setup(page, errors) {
   check(sums[1].includes('Bo Kim') && sums[1].includes('2 stops') && !sums[1].includes('estimated'), 'Bo (start found from his address) gets the east stops');
   check(routesCalls === 2, 'Google road times asked once per driver (' + routesCalls + ')');
   check(sums.some(t => t.includes('Not on a route') && t.includes('1 stop')), 'unfound stop listed as not on a route');
+  // Max stops: with a max of 2, Ana's third stop goes off the routes with the reason; back to 50 restores it.
+  await office.fill('#dp-max', '2'); await office.dispatchEvent('#dp-max', 'change');
+  await office.waitForFunction(() => document.querySelector('.dp-route[data-id="_none"] summary').textContent.includes('2 stops'));
+  check((await office.textContent('.dp-route[data-id="a"] summary')).includes('2 stops') && (await office.textContent('.dp-route[data-id="_none"]')).includes('every driver near it has the max stops'), 'max stops leaves the extra stop off with the reason');
+  await office.fill('#dp-max', '50'); await office.dispatchEvent('#dp-max', 'change');
+  await office.waitForFunction(() => document.querySelector('.dp-route[data-id="a"] summary').textContent.includes('3 stops'));
+  check(true, 'max back to 50 puts it back');
   // Fix the address.
   await office.fill('#dp-flags li:has-text("NOE,CY") .dp-fix input', '60 WILLOW AVE TOWN CA 91000');
   await office.click('#dp-flags li:has-text("NOE,CY") .dp-fix .btn');
@@ -164,6 +171,7 @@ async function setup(page, errors) {
   // Select tool: loop around Bo's two east stops (EAST -117.85, ELM -117.88 => x 620-650, y 450-460) and give them to Ana.
   await office.click('[data-dptool="select"]');
   check(await office.isVisible('#dp-sel-help') && await office.isVisible('#dp-draw'), 'select mode shows help and the drawing layer');
+  await office.locator('#dp-map-card').evaluate(e => e.scrollIntoView({ block: 'start' }));
   const mb = await office.locator('#dp-draw').boundingBox();
   const loop = [[600, 430], [680, 430], [680, 480], [600, 480], [600, 432]];
   await office.mouse.move(mb.x + loop[0][0], mb.y + loop[0][1]); await office.mouse.down();

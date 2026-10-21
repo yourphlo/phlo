@@ -171,7 +171,17 @@ const asg = ctx.phloAssignStops([
   { id: 'cold', lat: 34.05, lng: -118.15, tags: ['FRIDGE'] }, { id: 'lost', lat: null, lng: null, tags: [] },
   { id: 'hand', lat: 34.05, lng: -118.15, tags: [], driverId: 'B' }], ds);
 eq(Object.keys(asg).sort().map(k => k + ':' + asg[k].driverId + ':' + asg[k].flags.join('+')),
-  ['cold:C:outside', 'e:B:', 'far:C:outside', 'hand:B:manual', 'lost:null:notFound', 'mid:A:overlap', 'w:A:'], 'assign stops (B is full, so the overlap goes to A; far goes to the nearest start)');
+  ['cold:C:outside', 'e:null:full', 'far:C:outside', 'hand:B:manual', 'lost:null:notFound', 'mid:A:overlap', 'w:A:'], 'assign stops (B is full with the hand-picked stop, so e is left off and the overlap goes to A; far goes to the nearest start)');
+// A hard limit of 5 stops: 8 stops only A's area reaches -> 5 for A, 3 left off; with B's area nearby (within 2 miles), B takes the rest.
+{
+  const aArea = [[34, -118.2], [34, -118.1], [34.1, -118.1], [34.1, -118.2]], bArea = [[34, -118.095], [34, -118.0], [34.1, -118.0], [34.1, -118.095]];
+  const st = []; for (let i = 0; i < 8; i++) st.push({ id: 's' + i, lat: 34.01 + i * 0.01, lng: -118.12, tags: [] });
+  const count = (r, d) => Object.values(r).filter(x => x.driverId === d).length;
+  const alone = ctx.phloAssignStops(st, [{ id: 'A', areas: [aArea], types: [], capacity: 5, start: { lat: 34.05, lng: -118.15 } }]);
+  eq([count(alone, 'A'), Object.values(alone).filter(x => x.flags.includes('full')).length], [5, 3], 'max stops: the rest is left off the routes');
+  const both = ctx.phloAssignStops(st, [{ id: 'A', areas: [aArea], types: [], capacity: 5, start: { lat: 34.05, lng: -118.15 } }, { id: 'B', areas: [bArea], types: [], capacity: 5, start: { lat: 34.05, lng: -118.05 } }]);
+  eq([count(both, 'A'), count(both, 'B'), count(both, null)], [5, 3, 0], 'max stops: a neighbour within 2 miles takes the overflow');
+}
 // Yellow (Y) covers the west, purple (P) the east. Y's route runs north-south along lng -118.105.
 // x sits just inside P's area but right on Y's route (like a stray #31): it goes to Y.
 // z is inside P's area and more than 2 miles from Y's area: it stays with P even though Y passes nearer.
