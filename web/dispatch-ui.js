@@ -58,6 +58,13 @@
     if (!$('dp-live-date').value) $('dp-live-date').value = iso || A.isoDate(A.todayLocal());
   }
 
+  function onlyNames(s) {
+    return (s.only || []).map(function (id) {
+      var d = A.drivers().filter(function (x) { return x.id === id; })[0];
+      return d ? d.name : '?';
+    }).join(' or ');
+  }
+
   function note(msg) { $('dp-note').textContent = msg || ''; }
 
   /** The most stops a driver gets: the Max stops box, or the driver's own capacity if that is lower. */
@@ -193,7 +200,9 @@
     var stops = rows.map(function (row, i) {
       var info = phloStopInfo(row);
       return { id: phloStopId(row), row: i, name: String(row[0] || ''), address: String(row[1] || ''), typed: String(row[1] || ''), store: info.store,
-        notes: String(row[3] || ''), copay: info.copay, tags: info.tags, lat: null, lng: null, flags: [] };
+        notes: String(row[3] || ''), copay: info.copay, tags: info.tags, lat: null, lng: null, flags: [],
+        // "only Jorge can deliver" in the note: only Jorge gets it (all drivers, so we can say who is missing).
+        only: phloNoteDrivers(row[3], A.drivers().map(function (d) { return { id: d.id, name: d.name, username: d.username }; })) };
     });
     // Two rows with the same RX numbers would share an id: keep ids unique.
     var seen = {};
@@ -239,7 +248,7 @@
 
   function assign(manual) {
     var input = plan.stops.map(function (s) {
-      return { id: s.id, lat: s.lat, lng: s.lng, tags: s.tags, driverId: manual && manual[s.id] };
+      return { id: s.id, lat: s.lat, lng: s.lng, tags: s.tags, driverId: manual && manual[s.id], only: s.only };
     });
     var ds = plan.drivers.map(function (d) {
       return driverInput(d);
@@ -251,6 +260,8 @@
       s.manual = r.flags.indexOf('manual') >= 0;
       s.flags = addressFlags(r.flags);
       s.full = r.flags.indexOf('full') >= 0;
+      s.onlyAbsent = r.flags.indexOf('onlyAbsent') >= 0;
+      s.onlyNote = r.flags.indexOf('only') >= 0;
       if (s.partial && s.flags.indexOf('notFound') < 0) s.flags.push('partial');
     });
   }
@@ -278,6 +289,7 @@
       stop.driverId = driverId;
       stop.manual = !!driverId;
       stop.full = false;
+      stop.onlyAbsent = false;
       stop.flags = addressFlags(stop.flags);
       moved++;
     });
@@ -302,11 +314,12 @@
       // Check the fixed stop against the routes already planned (they stay as they are).
       var others = plan.stops.filter(function (x) { return x !== stop && x.driverId && x.lat != null; })
         .map(function (x) { return { id: x.id, lat: x.lat, lng: x.lng, driverId: x.driverId, fixed: true }; });
-      var res = phloAssignStops(others.concat([{ id: stop.id, lat: r.lat, lng: r.lng, tags: stop.tags, driverId: stop.manual ? stop.driverId : null }]),
+      var res = phloAssignStops(others.concat([{ id: stop.id, lat: r.lat, lng: r.lng, tags: stop.tags, driverId: stop.manual ? stop.driverId : null, only: stop.only }]),
         plan.drivers.map(driverInput))[stop.id];
       stop.driverId = res.driverId;
       stop.flags = addressFlags(res.flags);
       stop.full = res.flags.indexOf('full') >= 0;
+      stop.onlyAbsent = res.flags.indexOf('onlyAbsent') >= 0;
       if (r.partial) stop.flags.push('partial');
       var d = plan.drivers.filter(function (x) { return x.id === stop.driverId; })[0];
       return (d ? routeDriver(d) : Promise.resolve()).then(afterPlan);
@@ -403,7 +416,7 @@
           el('td', { class: 'eta', text: phloClock(s.eta) }),
           el('td', { class: 'code', text: s.name }),
           addrCell(s),
-          el('td', { text: [s.store, s.notes].filter(Boolean).join(' · ') }),
+          el('td', {}, [[s.store, s.notes].filter(Boolean).join(' · '), s.onlyNote && !s.manual ? el('span', { class: 'chip', text: 'Only ' + onlyNames(s) + ' (note)' }) : null]),
           el('td', {}, [moveSelect(s)])
         ]));
       });
@@ -418,7 +431,8 @@
       var det = el('details', { class: 'dp-route', 'data-id': '_none', open: '' }, [el('summary', {}, [el('b', { text: 'Not on a route' }), el('span', { class: 'warn-txt', text: off.length + ' stop' + (off.length === 1 ? '' : 's') })])]);
       var ul = el('ul', { class: 'live-list' });
       off.forEach(function (s) {
-        var why = s.lat == null ? 'address not found' : s.full ? 'every driver near it has the max stops' : 'taken off by hand';
+        var why = s.lat == null ? 'address not found' : s.onlyAbsent ? 'its note asks for ' + onlyNames(s) + ', not working today' :
+          s.full ? 'every driver near it has the max stops' : 'taken off by hand';
         ul.appendChild(el('li', {}, [el('span', { class: 'seq', text: '–' }),
           el('span', { class: 'what' }, [el('b', { text: s.name }), ' ' + useAddr(s) + ' ', el('span', { class: 'chip warn', text: why })]), moveSelect(s)]));
       });

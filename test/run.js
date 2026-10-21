@@ -172,6 +172,22 @@ const asg = ctx.phloAssignStops([
   { id: 'hand', lat: 34.05, lng: -118.15, tags: [], driverId: 'B' }], ds);
 eq(Object.keys(asg).sort().map(k => k + ':' + asg[k].driverId + ':' + asg[k].flags.join('+')),
   ['cold:C:outside', 'e:null:full', 'far:C:outside', 'hand:B:manual', 'lost:null:notFound', 'mid:A:overlap', 'w:A:'], 'assign stops (B is full with the hand-picked stop, so e is left off and the overlap goes to A; far goes to the nearest start)');
+// Notes that ask for a driver.
+{
+  const ds = [{ id: 'j', name: 'Jorge Ramos', username: '' }, { id: 'a', name: 'Ana Ruiz', username: 'ana' }, { id: 'w', name: 'Will Smith', username: '' }, { id: 'k', name: 'Kim Lee', username: 'kimmy' }];
+  const t = n => JSON.stringify(ctx.phloNoteDrivers(n, ds));
+  eq([t('$5.00-ONLY JORGE CAN DELIVERS'), t('Jorge only'), t('driver: Jorge'), t('give to jorge pls'), t('must be delivered by Jorge or Ana'),
+      t('call Jorge (son) at door'), t('pt will deliver later'), t('only Will Smith'), t('kimmy only'), t('FRIDGE-COMBO'), t('')],
+    ['["j"]', '["j"]', '["j"]', '["j"]', '["j","a"]', '[]', '[]', '["w"]', '["k"]', '[]', '[]'], 'driver named in a note');
+  // Jorge's area is far away, Ana's covers the stop: the note still wins. If Jorge isn't working, the stop is left off.
+  const area = [[34, -118.2], [34, -118], [34.1, -118], [34.1, -118.2]], farArea = [[34.5, -118.2], [34.5, -118], [34.6, -118], [34.6, -118.2]];
+  const work = [{ id: 'a', areas: [area], types: [], capacity: 1, start: { lat: 34.05, lng: -118.1 } }, { id: 'j', areas: [farArea], types: [], capacity: 1, start: { lat: 34.55, lng: -118.1 } }];
+  const st = [{ id: 'n', lat: 34.05, lng: -118.1, tags: [], only: ['j'] }, { id: 'n2', lat: 34.06, lng: -118.1, tags: [], only: ['j'] }, { id: 'x', lat: 34.05, lng: -118.11, tags: [] }];
+  const r = ctx.phloAssignStops(st, work);
+  eq([r.n.driverId, r.n2.driverId, r.n.flags, r.x.driverId], ['j', 'j', ['only'], 'a'], 'note picks the driver, past area and max stops');
+  const r2 = ctx.phloAssignStops([{ id: 'n', lat: 34.05, lng: -118.1, tags: [], only: ['j'] }], [work[0]]);
+  eq([r2.n.driverId, r2.n.flags], [null, ['onlyAbsent']], 'named driver not working: left off');
+}
 // A hard limit of 5 stops: 8 stops only A's area reaches -> 5 for A, 3 left off; with B's area nearby (within 2 miles), B takes the rest.
 {
   const aArea = [[34, -118.2], [34, -118.1], [34.1, -118.1], [34.1, -118.2]], bArea = [[34, -118.095], [34, -118.0], [34.1, -118.0], [34.1, -118.095]];

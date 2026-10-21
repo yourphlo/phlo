@@ -262,6 +262,29 @@ async function setup(page, errors) {
   await office.keyboard.press('Escape');
   if (shots) await office.screenshot({ path: path.join(shots, 'live.png'), fullPage: true });
 
+  /* ---- a note that names a driver ---- */
+  const nerrors = [];
+  const office2 = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+  await setup(office2, nerrors);
+  await office2.addInitScript(d => { if (!localStorage.getItem('phlo.drivers')) localStorage.setItem('phlo.drivers', d); }, JSON.stringify(DRIVERS));
+  await office2.goto(base);
+  await office2.click('#signin-main');
+  await office2.waitForSelector('#tabs:not([hidden])');
+  await office2.fill('#date', '2026-10-22');
+  // ROE is in Ana's area, but the pharmacy wrote that only Bo can deliver it.
+  await office2.fill('.paste-text', PASTE.replace('ROE,ANN - 20 WILLOW AVE TOWN CA 91000\t\t\t\t\t', 'ROE,ANN - 20 WILLOW AVE TOWN CA 91000\t\t\t\tONLY BO CAN DELIVER\t'));
+  await office2.click('#build');
+  await office2.waitForFunction(() => document.querySelectorAll('#master tbody tr').length === 6);
+  check((await office2.textContent('#master')).includes('ONLY BO CAN DELIVER'), 'the note is in the master');
+  await office2.click('.tab[data-view="dispatch"]');
+  await office2.click('#dp-plan');
+  await office2.waitForSelector('#dp-routes-card:not([hidden])');
+  await office2.click('.dp-route summary >> text=Bo Kim');
+  const boRows = await office2.textContent('.dp-route[data-id="b"] tbody');
+  check(boRows.includes('ROE,ANN') && boRows.includes('Only Bo Kim (note)'), 'stop whose note names Bo goes to Bo, with a tag');
+  check(!(await office2.textContent('.dp-route[data-id="a"]')).includes('ROE,ANN'), 'and not to Ana, whose area it is in');
+  check(!nerrors.length, 'no page errors (note run) ' + JSON.stringify(nerrors));
+
   check(!errors.length && !derrors.length, 'no page errors ' + JSON.stringify(errors.concat(derrors)));
   await browser.close(); web.close();
   console.log(failures ? failures + ' failure(s)' : 'dispatch e2e: all good');
