@@ -86,10 +86,16 @@ on the Drivers tab for the delivery date) and sends each driver their route.
    drawn only get stops no area reaches; a FRIDGE stop only goes to a driver with that type.) No driver
    gets more than **Max stops per driver** (50 unless you change it; a driver's own capacity, if
    lower, wins). A stop that every nearby driver is too full for is listed under **Not on a route**
-   for you to give to someone by hand. It then
+   for you to give to someone by hand.
+   A stop whose note names a driver ("only Jorge can deliver", "Jorge only", "driver: Jorge", "give to
+   Jorge") goes only to that driver, wherever their area is and even past the max (tagged "Only Jorge
+   (note)"). The name has to be near a word like only, driver, deliver or give, so "call Jorge (son)"
+   doesn't count; first names that are everyday words (Will, May, Mark...) count only as the full name.
+   If that driver isn't working that day, the stop is listed under **Not on a route**. It then
    orders each route by real driving time from the driver's start address (and back to their end
    address, if they have one). Arrival times use the driver's hours, lunch break and speed, plus
-   **Minutes per stop**. **Start time** is used for drivers without an availability start.
+   **Minutes per stop** (10 unless you change it). **Start time** (9:00 AM unless you change it) is used for
+   drivers without an availability start.
 2. **Check before sending** lists address problems only: stop addresses Google can't find (fix the
    address and click **Find**), stop addresses Google only found part of, and driver start or end
    addresses it can't find (fix those on the Drivers tab). When Google only found part of an

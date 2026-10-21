@@ -1,7 +1,7 @@
 /* PHLO dispatch: who takes each stop, in what order, and when they get there.
  * Pure functions (no page or Google code) so test/run.js can check them in Node. */
 
-var DISPATCH_DEFAULTS = { dayStart: '09:00', serviceMin: 4 };
+var DISPATCH_DEFAULTS = { dayStart: '09:00', serviceMin: 10 };
 // Travel time multiplier per driver speed (an assumption: a slow driver takes 15% longer).
 var SPEED_FACTORS = { SLOW: 1.15, NORMAL: 1, FAST: 0.9 };
 var GOOGLE_MAX_VIA = 25; // Google optimizes at most 25 stops between a start and an end
@@ -72,6 +72,46 @@ function phloStopInfo(row) {
   };
 }
 
+// Words in a stop's note that, near a driver's name, mean only that driver should take it
+// ("only Jorge can deliver", "Jorge only", "driver: Jorge", "give to Jorge", "must be Jorge").
+var ONLY_WORDS = ['only', 'must', 'driver', 'drivers', 'deliver', 'delivers', 'delivered', 'delivery', 'deliveries',
+  'assign', 'assigned', 'give', 'given', 'take', 'takes', 'send', 'sent', 'by', 'with'];
+// First names that are also everyday words: these match only as the driver's full name.
+var COMMON_WORD_NAMES = ['will', 'may', 'june', 'april', 'art', 'bill', 'rose', 'grace', 'hope', 'joy', 'mark', 'pat',
+  'sky', 'sunny', 'faith', 'dawn', 'summer', 'ray', 'rich', 'frank', 'jack', 'chase', 'drew', 'gene', 'van', 'see', 'an', 'al', 'ed', 'jo'];
+
+/**
+ * Drivers a stop's note asks for: [driverId]. A driver's first name, full name or app username has to be
+ * within 4 words of a word like "only", "driver", "deliver" or "give" ("only jorge can delivers" -> Jorge).
+ * drivers: [{id, name, username}] (all drivers, so a note can name someone who isn't working that day).
+ */
+function phloNoteDrivers(note, drivers) {
+  var words = String(note || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
+  if (!words.length) return [];
+  var near = function (start, len) {
+    for (var i = Math.max(0, start - 4); i < Math.min(words.length, start + len + 4); i++) {
+      if ((i < start || i >= start + len) && ONLY_WORDS.indexOf(words[i]) >= 0) return true;
+    }
+    return false;
+  };
+  var found = function (nameWords) {
+    if (!nameWords.length) return false;
+    for (var i = 0; i + nameWords.length <= words.length; i++) {
+      var hit = true;
+      for (var k = 0; k < nameWords.length; k++) if (words[i + k] !== nameWords[k]) { hit = false; break; }
+      if (hit && near(i, nameWords.length)) return true;
+    }
+    return false;
+  };
+  return drivers.filter(function (d) {
+    var full = String(d.name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
+    var tries = [full];
+    if (full[0] && COMMON_WORD_NAMES.indexOf(full[0]) < 0 && full[0].length > 1) tries.push([full[0]]);
+    if (d.username && COMMON_WORD_NAMES.indexOf(d.username) < 0 && d.username.length > 1) tries.push([d.username]);
+    return tries.some(found);
+  }).map(function (d) { return d.id; });
+}
+
 var AREA_BUFFER_KM = 3.22; // a driver can take stops up to 2 miles outside their drawn area
 
 /** Distance in km from a point to a drawn area (0 inside it). */
@@ -111,8 +151,10 @@ function phloDriverAreaKm(p, d) {
  *   - capacity is a hard limit (stops picked by hand aside): a stop that no allowed driver has room for
  *     is left off the routes (driverId null, flag: full), after trying to make room by moving one of a
  *     full driver's stops to a neighbour with room.
+ *   - only: [driverId] from the stop's note (phloNoteDrivers): the stop goes only to those drivers, wherever
+ *     their area is and even past their max stops. If none of them is working it is left off (flag: onlyAbsent).
  * Returns {stopId: {driverId, flags: [...]}}. Flags: notFound, outside, overlap (several areas reach it),
- * type (no working driver has its types), full, manual (picked by hand).
+ * type (no working driver has its types), full, only (the note named the driver), onlyAbsent, manual (picked by hand).
  */
 function phloAssignStops(stops, drivers, cost) {
   cost = cost || phloEstMin;
@@ -135,6 +177,14 @@ function phloAssignStops(stops, drivers, cost) {
     if (s.driverId && byId[s.driverId]) {
       out[s.id] = { driverId: s.driverId, flags: s.fixed ? [] : ['manual'] };
       routes[s.driverId].push(s); load[s.driverId]++;
+      return;
+    }
+    if (s.only && s.only.length) {
+      var named = s.only.filter(function (id) { return byId[id]; }).map(function (id) { return byId[id]; });
+      if (!named.length) { out[s.id] = { driverId: null, flags: ['onlyAbsent'] }; return; }
+      var nkm = {};
+      named.forEach(function (d) { nkm[d.id] = phloDriverAreaKm(s, d); });
+      movable.push({ s: s, flags: ['only'], cands: named, km: nkm, force: true });
       return;
     }
     var flags = [];
@@ -165,8 +215,8 @@ function phloAssignStops(stops, drivers, cost) {
   movable.slice().sort(function (a, b) { return a.cands.length - b.cands.length; }).forEach(function (m) {
     var best = null, bestScore = Infinity;
     m.cands.forEach(function (d) {
-      if (load[d.id] >= cap(d)) return;
-      var score = score0(m, d);
+      if (load[d.id] >= cap(d) && !m.force) return;
+      var score = score0(m, d) + (load[d.id] >= cap(d) ? 1e6 : 0);
       if (score < bestScore) { bestScore = score; best = d; }
     });
     m.driverId = best ? best.id : null;
@@ -212,7 +262,7 @@ function phloAssignStops(stops, drivers, cost) {
       var add = bestInsert(d, m.s).cost + outsidePenalty(m, d);
       routes[d.id].forEach(function (s2, i) {
         var m2 = byStop[s2.id];
-        if (!m2) return; // picked by hand: stays
+        if (!m2 || m2.force) return; // picked by hand or named in its note: stays
         var out2 = removeSaving(d, i);
         m2.cands.forEach(function (e) {
           if (e.id === d.id || load[e.id] >= cap(e)) return;
