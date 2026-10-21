@@ -119,6 +119,12 @@ tr.flash td { animation: flash 1.6s ease-out; }
 .del { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 6px; border-radius: 5px; }
 .del:hover { color: var(--error); background: var(--error-bg); }
 
+.paste-list { display: grid; gap: 14px; }
+.paste-head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin-bottom: 6px; }
+.paste-head .code { font-weight: 600; }
+.paste-head .btn { margin-left: auto; }
+.paste-text { width: 100%; min-height: 96px; resize: vertical; box-sizing: border-box; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: transparent; color: inherit; white-space: pre; }
 .drop { display: grid; place-items: center; border: 1.5px dashed var(--line); border-radius: 10px; padding: 22px; cursor: pointer; color: var(--muted); }
 .drop.over { border-color: var(--focus); background: var(--info-bg); }
 .drop input { position: absolute; opacity: 0; width: 1px; height: 1px; }

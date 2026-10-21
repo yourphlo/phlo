@@ -22,6 +22,7 @@ var MASTER_HEADERS = ['NAME', 'ADDRESS', 'NOTES', 'NOTES 2'];
  * xlsx        the source is an .xlsx file in Drive, not a Google Sheet
  * search      find the file by name (newest match) instead of a fixed id
  * tabPerDay   one tab per pickup day named like "Mon 10/19/26"
+ * paste       the page has a box to paste this store's cells into (for a sheet that isn't in Google Drive)
  */
 var STORES = [
   { code: 'VALLEY', title: '986 VLY#8012 PHLO LIST',
@@ -55,7 +56,7 @@ var STORES = [
     id: '1sojU9EHFQ9wBoTH48TLZQY0Onop8DByp', xlsx: true,
     cols: { date: 0, id: 3, name: 4, copay: 5, fridge: 6, notes: [7] } },
   { code: 'BP', title: '986 BP PHLO (newest monthly file)',
-    search: { titleContains: ['BP', 'PHLO'] }, tabPerDay: true,
+    search: { titleContains: ['BP', 'PHLO'] }, tabPerDay: true, paste: true,
     cols: { id: 2, name: 3, notes: [7], copay: 8 } },
   { code: 'SG', title: '986 SG#8037 (121460) - DELIVERY LOG',
     id: '1l_2pDmXwADKir-kHDxGqNUmany4NRFN4BEk_1YfDmfw',

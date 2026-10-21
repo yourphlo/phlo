@@ -141,6 +141,45 @@ function phloBags(text) {
 
 function phloIsFridge(text) { return /^(YES|Y|1|TRUE|FRIDGE|REFRIG)/i.test(String(text || '').trim()); }
 
+/**
+ * Cells copied from Excel or Google Sheets and pasted as text: tab between cells, new line between
+ * rows, and a cell holding a line break, tab or quote is wrapped in quotes ("" for a quote inside).
+ */
+function phloParsePasted(text) {
+  text = String(text || '').replace(/\r\n?/g, '\n');
+  var rows = [], row = [], cell = '', i = 0, quoted = false, atStart = true;
+  while (i < text.length) {
+    var ch = text[i];
+    if (quoted) {
+      if (ch === '"' && text[i + 1] === '"') { cell += '"'; i += 2; continue; }
+      if (ch === '"') { quoted = false; i++; continue; }
+      cell += ch; i++; continue;
+    }
+    if (ch === '"' && atStart) { quoted = true; atStart = false; i++; continue; }
+    if (ch === '\t') { row.push(cell); cell = ''; atStart = true; i++; continue; }
+    if (ch === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; atStart = true; i++; continue; }
+    cell += ch; atStart = false; i++;
+  }
+  if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter(function (r) { return r.some(function (c) { return c.trim() !== ''; }); });
+}
+
+/**
+ * Pasted rows for a store with one tab per pickup day. Rows go on `pickup`; a line holding only a
+ * date (like the tab name "Sat 10/17/26") starts another day, so two tabs can share one paste.
+ */
+function phloPastedValues(text, pickup, ref) {
+  var banner = function (d) { return ['PHLO PICK UP ON ' + phloFmt(d, 'MM/dd/yyyy')]; };
+  var values = [banner(pickup)];
+  phloParsePasted(text).forEach(function (row) {
+    var filled = row.filter(function (c) { return c.trim() !== ''; });
+    var day = filled.length === 1 && filled[0].trim().length <= 24 && !/\d{5,}/.test(filled[0]) ?
+      phloParseDate(filled[0], ref, true) : null;
+    values.push(day ? banner(day) : row);
+  });
+  return values;
+}
+
 /** Reads raw store rows into entries for delivery date D (no grouping yet). */
 function phloExtract(values, store, delivery) {
   var c = store.cols;

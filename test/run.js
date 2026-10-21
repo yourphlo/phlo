@@ -64,6 +64,23 @@ eq(ctx.phloStoreRows([
   ['1000024,ONE BAG HOME', '4 D ST TOWN CA 91000', 'TX', ''],
 ], 'TX store');
 
+// Cells pasted from Excel: tabs between cells, quoted cells with line breaks and "" quotes.
+eq(ctx.phloParsePasted('A\tB\r\n"line 1\nline 2"\t"say ""hi"""\r\n\t\r\n'), [['A', 'B'], ['line 1\nline 2', 'say "hi"']], 'paste parse');
+const bpStore = ctx.STORES.find(s => s.code === 'BP');
+const bpPaste = [
+  'TIME\tSTORE\tRX #\tPATIENT\t\t\t\tNOTES\tCOPAY',
+  '9AM\tBP\t1000031\t"PAT,ONE\n10 A ST TOWN CA 91000"\t\t\t\tgate code 12\t$4.50',
+  'Sat 10/17/26',
+  '\t\t1000032\tPAT,TWO, 20 B ST TOWN CA 91000\t\t\t\t\t',
+  'Fri 10/16/26',
+  '\t\t1000033\tOLD,ROW, 30 C ST TOWN CA 91000\t\t\t\t\t',
+].join('\n');
+const monday = ctx.phloUtc(2026, 10, 19);
+eq(ctx.phloStoreRows(ctx.phloPastedValues(bpPaste, ctx.phloUtc(2026, 10, 18), monday), bpStore, monday), [
+  ['1000031,PAT,ONE', '10 A ST TOWN CA 91000', 'BP', '$4.50-gate code 12'],
+  ['1000032,PAT,TWO', '20 B ST TOWN CA 91000', 'BP', ''],
+], 'BP pasted cells');
+
 const checks = ctx.phloCheckRows([
   ['1000010, 1000011,V 1000012, A,B, & C,D', '600 BIRCH AVE APT 5 TOWN CA 91000', 'EM', ''],
   ['1000013,X,Y', '700 ASH AVE APT 1 TOWN CA 910002', 'WT DME', ''],

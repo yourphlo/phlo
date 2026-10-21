@@ -230,6 +230,53 @@
     });
   }
 
+  /* ---------------- pasted cells ---------------- */
+
+  // One paste box per store marked `paste`. What's pasted stays in the page only (never saved).
+  var pasteBoxes = {};
+
+  function renderPasteBoxes() {
+    var list = $('paste-list');
+    STORES.filter(function (s) { return s.paste; }).forEach(function (store) {
+      var date = el('input', { type: 'date', 'aria-label': store.code + ' pickup day' });
+      var count = el('span', { class: 'pill' });
+      var text = el('textarea', { class: 'paste-text', spellcheck: 'false', autocomplete: 'off', wrap: 'off',
+        'aria-label': 'Cells pasted from the ' + store.code + ' sheet', placeholder: 'Paste ' + store.code + ' cells here' });
+      var clear = el('button', { class: 'btn ghost', type: 'button', text: 'Clear' });
+      var update = function () {
+        var n = phloParsePasted(text.value).filter(function (r) { return /\d{5,}/.test(r.join(' ')); }).length;
+        count.textContent = text.value.trim() ? n + ' row' + (n === 1 ? '' : 's') + ' with an RX number' : '';
+      };
+      text.addEventListener('input', update);
+      clear.addEventListener('click', function () { text.value = ''; update(); text.focus(); });
+      list.appendChild(el('div', { class: 'paste-store' }, [
+        el('div', { class: 'paste-head' }, [
+          el('span', { class: 'code', text: store.code }),
+          el('label', { class: 'field' }, ['Pickup day', date]),
+          count, clear
+        ]),
+        text
+      ]));
+      pasteBoxes[store.code] = { date: date, text: text };
+    });
+    $('paste-card').hidden = !Object.keys(pasteBoxes).length;
+  }
+
+  /** Pickup day follows the delivery date: the day before (Sunday for a Monday delivery). */
+  function resetPasteDates() {
+    if (!$('date').value) return;
+    var pickup = phloPickupDates(fromIso($('date').value))[0];
+    Object.keys(pasteBoxes).forEach(function (k) { pasteBoxes[k].date.value = isoDate(pickup); });
+  }
+
+  /** The store's pasted cells as a readStore() result, or null when its box is empty. */
+  function pasted(store, delivery) {
+    var box = pasteBoxes[store.code];
+    if (!box || !box.text.value.trim()) return null;
+    var pickup = box.date.value ? fromIso(box.date.value) : phloPickupDates(delivery)[0];
+    return Promise.resolve({ values: phloPastedValues(box.text.value, pickup, delivery), file: {}, tabs: ['pasted cells'] });
+  }
+
   /* ---------------- build ---------------- */
 
   function build() {
@@ -249,7 +296,8 @@
         el('span', { class: 'title', text: store.title || '' }),
         meta
       ]));
-      return readStore(store, delivery).then(function (r) {
+      var read = pasted(store, delivery) || readStore(store, delivery);
+      return read.then(function (r) {
         if (!r) {
           status.className = 'status warn'; status.textContent = 'no file found';
           return { store: store, rows: [], problem: 'No sheet found in Drive' };
@@ -734,7 +782,9 @@
   document.addEventListener('DOMContentLoaded', function () {
     $('date').value = isoDate(phloAddDays(todayLocal(), 1));
     updateWindowNote();
-    $('date').addEventListener('change', updateWindowNote);
+    renderPasteBoxes();
+    resetPasteDates();
+    $('date').addEventListener('change', function () { updateWindowNote(); resetPasteDates(); });
     $('signin').addEventListener('click', function () { signIn(); });
     $('signin-main').addEventListener('click', function () { signIn(); });
     $('signout').addEventListener('click', signOut);
