@@ -339,3 +339,5 @@ td .typed { font-size: 12px; color: var(--muted); }
 .dv-stop .ad.typed { font-size: 13px; font-style: italic; }
 .dv-stop .seq { grid-row: 1 / span 9; }
 .dv-stop > :not(.seq) { grid-column: 2; }
+/* status messages never block a click or tap underneath */
+.toast { pointer-events: none; }

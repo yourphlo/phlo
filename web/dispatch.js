@@ -108,9 +108,11 @@ function phloDriverAreaKm(p, d) {
  *   - Each stop starts with the nearest area, then stops move one at a time to whichever allowed driver's
  *     route passes closest (cheapest detour), until no move shortens the total driving. That pulls stray
  *     stops onto the route that already goes by them and keeps routes from crossing into each other.
- *   - Capacity is respected when there is a choice.
+ *   - capacity is a hard limit (stops picked by hand aside): a stop that no allowed driver has room for
+ *     is left off the routes (driverId null, flag: full), after trying to make room by moving one of a
+ *     full driver's stops to a neighbour with room.
  * Returns {stopId: {driverId, flags: [...]}}. Flags: notFound, outside, overlap (several areas reach it),
- * type (no working driver has its types), manual (picked by hand).
+ * type (no working driver has its types), full, manual (picked by hand).
  */
 function phloAssignStops(stops, drivers, cost) {
   cost = cost || phloEstMin;
@@ -157,15 +159,18 @@ function phloAssignStops(stops, drivers, cost) {
     return out;
   }
 
-  // 1. Start each stop with the nearest area (else the nearest start), avoiding full drivers.
-  movable.forEach(function (m) {
+  // 1. Start each stop with the nearest area (else the nearest start) that has room. Stops with the
+  //    fewest choices go first so they get a place before the flexible ones fill the drivers up.
+  var score0 = function (m, d) { return (m.km[d.id] !== null ? m.km[d.id] : 0) * 10 + (d.start ? phloKm(d.start, m.s) : 0); };
+  movable.slice().sort(function (a, b) { return a.cands.length - b.cands.length; }).forEach(function (m) {
     var best = null, bestScore = Infinity;
     m.cands.forEach(function (d) {
-      var score = (m.km[d.id] !== null ? m.km[d.id] : 0) * 10 + (d.start ? phloKm(d.start, m.s) : 0) + (load[d.id] >= cap(d) ? 1e6 : 0);
+      if (load[d.id] >= cap(d)) return;
+      var score = score0(m, d);
       if (score < bestScore) { bestScore = score; best = d; }
     });
-    m.driverId = best.id; load[best.id]++;
-    routes[best.id].push(m.s);
+    m.driverId = best ? best.id : null;
+    if (best) { load[best.id]++; routes[best.id].push(m.s); }
   });
 
   // 2. Order each route, then move stops to whichever allowed route passes closest.
@@ -174,7 +179,6 @@ function phloAssignStops(stops, drivers, cost) {
     routes[d.id] = phloOrderStops(r, d.start || null, d.end || null, cost).map(function (i) { return r[i]; });
   });
   var leg = function (a, b) { return a && b ? cost(a, b) : 0; };
-  var gap = function (d, a, b) { return leg(a || d.start, b || d.end); };
   // A small preference for staying inside one's own drawn area (minutes).
   var outsidePenalty = function (m, d) { return m.km[d.id] ? 2 : 0; };
   var removeSaving = function (d, i) {
@@ -190,9 +194,42 @@ function phloAssignStops(stops, drivers, cost) {
     }
     return best;
   };
+  var place = function (m, d, pos) { routes[d.id].splice(pos, 0, m.s); load[d.id]++; m.driverId = d.id; };
+  var take = function (m) { var r = routes[m.driverId], i = r.indexOf(m.s); r.splice(i, 1); load[m.driverId]--; m.driverId = null; };
+  var byStop = {}; movable.forEach(function (m) { byStop[m.s.id] = m; });
+  // A stop no allowed driver has room for: put it with one that has room, else make room by moving one
+  // of a full driver's stops to a neighbour with room (cheapest way). Returns true when placed.
+  var fit = function (m) {
+    var best = null, bestCost = Infinity;
+    m.cands.forEach(function (d) {
+      if (load[d.id] >= cap(d)) return;
+      var ins = bestInsert(d, m.s), c = ins.cost + outsidePenalty(m, d);
+      if (c < bestCost) { bestCost = c; best = { d: d, pos: ins.pos }; }
+    });
+    if (best) { place(m, best.d, best.pos); return true; }
+    var swap = null;
+    m.cands.forEach(function (d) {
+      var add = bestInsert(d, m.s).cost + outsidePenalty(m, d);
+      routes[d.id].forEach(function (s2, i) {
+        var m2 = byStop[s2.id];
+        if (!m2) return; // picked by hand: stays
+        var out2 = removeSaving(d, i);
+        m2.cands.forEach(function (e) {
+          if (e.id === d.id || load[e.id] >= cap(e)) return;
+          var c = add - out2 + bestInsert(e, s2).cost + outsidePenalty(m2, e);
+          if (!swap || c < swap.c) swap = { c: c, d: d, m2: m2, e: e };
+        });
+      });
+    });
+    if (!swap) return false;
+    take(swap.m2); place(swap.m2, swap.e, bestInsert(swap.e, swap.m2.s).pos);
+    place(m, swap.d, bestInsert(swap.d, m.s).pos);
+    return true;
+  };
   for (var pass = 0; pass < 20; pass++) {
     var moved = false;
     movable.forEach(function (m) {
+      if (!m.driverId) { if (fit(m)) moved = true; return; }
       if (m.cands.length < 2) return;
       var from = byId[m.driverId], idx = routes[from.id].indexOf(m.s);
       var stay = removeSaving(from, idx) + outsidePenalty(m, from);
@@ -211,7 +248,7 @@ function phloAssignStops(stops, drivers, cost) {
     });
     if (!moved) break;
   }
-  movable.forEach(function (m) { out[m.s.id] = { driverId: m.driverId, flags: m.flags }; });
+  movable.forEach(function (m) { out[m.s.id] = { driverId: m.driverId, flags: m.driverId ? m.flags : m.flags.concat(['full']) }; });
   return out;
 }
 

@@ -60,6 +60,17 @@
 
   function note(msg) { $('dp-note').textContent = msg || ''; }
 
+  /** The most stops a driver gets: the Max stops box, or the driver's own capacity if that is lower. */
+  function maxStops(d) {
+    var box = parseInt($('dp-max').value, 10);
+    var max = box > 0 ? box : Infinity;
+    return typeof d.src.capacity === 'number' ? Math.min(d.src.capacity, max) : max;
+  }
+  function driverInput(d) {
+    var m = maxStops(d);
+    return { id: d.id, areas: d.src.areas, types: d.src.types, capacity: isFinite(m) ? m : '', start: d.startPt, end: d.endPt };
+  }
+
   /* ---------------- Google: addresses ---------------- */
 
   function geocoder() {
@@ -231,7 +242,7 @@
       return { id: s.id, lat: s.lat, lng: s.lng, tags: s.tags, driverId: manual && manual[s.id] };
     });
     var ds = plan.drivers.map(function (d) {
-      return { id: d.id, areas: d.src.areas, types: d.src.types, capacity: d.src.capacity, start: d.startPt, end: d.endPt };
+      return driverInput(d);
     });
     var res = phloAssignStops(input, ds);
     plan.stops.forEach(function (s) {
@@ -239,6 +250,7 @@
       s.driverId = r.driverId;
       s.manual = r.flags.indexOf('manual') >= 0;
       s.flags = addressFlags(r.flags);
+      s.full = r.flags.indexOf('full') >= 0;
       if (s.partial && s.flags.indexOf('notFound') < 0) s.flags.push('partial');
     });
   }
@@ -265,6 +277,7 @@
       if (stop.driverId) changed[stop.driverId] = true;
       stop.driverId = driverId;
       stop.manual = !!driverId;
+      stop.full = false;
       stop.flags = addressFlags(stop.flags);
       moved++;
     });
@@ -290,9 +303,10 @@
       var others = plan.stops.filter(function (x) { return x !== stop && x.driverId && x.lat != null; })
         .map(function (x) { return { id: x.id, lat: x.lat, lng: x.lng, driverId: x.driverId, fixed: true }; });
       var res = phloAssignStops(others.concat([{ id: stop.id, lat: r.lat, lng: r.lng, tags: stop.tags, driverId: stop.manual ? stop.driverId : null }]),
-        plan.drivers.map(function (d) { return { id: d.id, areas: d.src.areas, types: d.src.types, capacity: d.src.capacity, start: d.startPt, end: d.endPt }; }))[stop.id];
+        plan.drivers.map(driverInput))[stop.id];
       stop.driverId = res.driverId;
       stop.flags = addressFlags(res.flags);
+      stop.full = res.flags.indexOf('full') >= 0;
       if (r.partial) stop.flags.push('partial');
       var d = plan.drivers.filter(function (x) { return x.id === stop.driverId; })[0];
       return (d ? routeDriver(d) : Promise.resolve()).then(afterPlan);
@@ -374,7 +388,7 @@
         (sch && list.length ? ' · ' + phloClock(sch.start) + '–' + phloClock(sch.finish) + ' · driving ' + fmtMin(sch.driveMin) + (r.km ? ' (' + Math.round(r.km * 0.621) + ' mi)' : '') : '') +
         (r.estimated && list.length ? ' · estimated' : '');
       var warn = [];
-      if (typeof d.src.capacity === 'number' && list.length > d.src.capacity) warn.push('over capacity (' + d.src.capacity + ')');
+      if (list.length > maxStops(d)) warn.push('over the max of ' + maxStops(d));
       if (sch && sch.late.length) warn.push(sch.late.length + ' late');
       var det = el('details', { class: 'dp-route', 'data-id': d.id }, [
         el('summary', {}, [dot, el('b', { text: d.name }), el('span', { class: 'sum', text: sum }), warn.length ? el('span', { class: 'warn-txt', text: warn.join(' · ') }) : null])
@@ -403,7 +417,11 @@
     if (off.length) {
       var det = el('details', { class: 'dp-route', 'data-id': '_none', open: '' }, [el('summary', {}, [el('b', { text: 'Not on a route' }), el('span', { class: 'warn-txt', text: off.length + ' stop' + (off.length === 1 ? '' : 's') })])]);
       var ul = el('ul', { class: 'live-list' });
-      off.forEach(function (s) { ul.appendChild(el('li', {}, [el('span', { class: 'seq', text: '–' }), el('span', { class: 'what' }, [el('b', { text: s.name }), ' ' + useAddr(s)]), moveSelect(s)])); });
+      off.forEach(function (s) {
+        var why = s.lat == null ? 'address not found' : s.full ? 'every driver near it has the max stops' : 'taken off by hand';
+        ul.appendChild(el('li', {}, [el('span', { class: 'seq', text: '–' }),
+          el('span', { class: 'what' }, [el('b', { text: s.name }), ' ' + useAddr(s) + ' ', el('span', { class: 'chip warn', text: why })]), moveSelect(s)]));
+      });
       det.appendChild(el('div', { class: 'table-wrap' }, [ul]));
       box.appendChild(det);
     }
@@ -805,6 +823,17 @@
     pad.addEventListener('wheel', lassoWheel, { passive: false });
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && A.view() === 'dispatch' && selected().length && !document.querySelector('dialog[open]')) clearSel(); });
     $('dp-live-date').addEventListener('change', refreshLive);
+    // A new max re-splits the stops (keeping stops moved by hand) without looking addresses up again.
+    try { var savedMax = localStorage.getItem('phlo.maxStops'); if (savedMax) $('dp-max').value = savedMax; } catch (e) { /* storage blocked */ }
+    $('dp-max').addEventListener('change', function () {
+      try { localStorage.setItem('phlo.maxStops', $('dp-max').value); } catch (e) { /* storage blocked */ }
+      if (!plan) return;
+      var manual = {};
+      plan.stops.forEach(function (s) { if (s.manual) manual[s.id] = s.driverId; });
+      assign(manual);
+      note('Re-planning…');
+      Promise.all(plan.drivers.map(routeDriver)).then(afterPlan);
+    });
     ['dp-start', 'dp-service'].forEach(function (id) {
       $(id).addEventListener('change', function () {
         if (!plan) return;

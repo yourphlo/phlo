@@ -83,7 +83,10 @@ on the Drivers tab for the delivery date) and sends each driver their route.
    every address on Google Maps and splits the stops between the drivers: a driver only gets stops
    inside their coverage area or up to 2 miles outside it, and a stop goes to the driver whose route
    already passes closest to it, so routes stay in one piece and don't overlap. (Drivers with no area
-   drawn only get stops no area reaches; a FRIDGE stop only goes to a driver with that type.) It then
+   drawn only get stops no area reaches; a FRIDGE stop only goes to a driver with that type.) No driver
+   gets more than **Max stops per driver** (50 unless you change it; a driver's own capacity, if
+   lower, wins). A stop that every nearby driver is too full for is listed under **Not on a route**
+   for you to give to someone by hand. It then
    orders each route by real driving time from the driver's start address (and back to their end
    address, if they have one). Arrival times use the driver's hours, lunch break and speed, plus
    **Minutes per stop**. **Start time** is used for drivers without an availability start.
