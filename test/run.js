@@ -118,13 +118,14 @@ ctx.phloMarkRx(H, '2026-10-17', ['2000001', '2000002'], 'delivered');
 ctx.phloMarkRx(H, '2026-10-19', ['2000003', '2000004', '2000005'], 'delivered');
 ctx.phloMarkRx(H, '2026-10-20', ['2000006'], 'delivered');
 ctx.phloMarkRx(H, '2026-10-20', ['2000007'], 'missed');
-// 2000001 was delivered 10/17 but came back on 10/20 and is not confirmed there -> still open.
+// Only the previous delivery day (10/20) is checked. 2000001 is on it and not confirmed -> carried.
 const out = ctx.phloOutstanding(H, '2026-10-21', [row('2000007')]);
-eq(out.map(o => [o.rx, o.lastIso, o.firstIso]), [[['2000001'], '2026-10-20', '2026-10-17']], 'outstanding: newest day decides, today skipped');
+eq(out.map(o => [o.rx, o.lastIso, o.firstIso]), [[['2000001'], '2026-10-20', '2026-10-20']], 'outstanding: previous day only, today skipped');
 eq(ctx.phloOutstanding(H, '2026-10-21', []).map(o => o.rx.join() + (o.missed ? '!' : '')).sort(), ['2000001', '2000007!'], 'missed is carried');
 eq(ctx.phloOutstanding(H, '2026-10-20', []).length, 0, 'only days before the build date count');
 ctx.phloMarkRx(H, '2026-10-19', ['2000005'], null);
-eq(ctx.phloOutstanding(H, '2026-10-21', [row('2000007'), row('2000001')]).map(o => [o.rx, o.row[0]]), [[['2000005'], '2000004, 2000005,PAT,ONE']], 'combo row carried for its open RX');
+eq(ctx.phloOutstanding(H, '2026-10-21', [row('2000007'), row('2000001')]), [], 'an unconfirmed ticket two delivery days back is not carried');
+eq(ctx.phloOutstanding(H, '2026-10-20', []).map(o => [o.rx, o.row[0]]), [[['2000005'], '2000004, 2000005,PAT,ONE']], 'combo row carried for its open RX (Sunday skipped)');
 eq(ctx.phloDayCounts(H.days['2026-10-20']), { total: 3, delivered: 1, missed: 1, open: 1 }, 'day counts');
 // Mark the rest delivered, then undo: only the tickets it marked go back to not confirmed.
 const B = ctx.phloHistoryData(null);

@@ -6,9 +6,10 @@
  *   day = {rows: [[NAME, ADDRESS, NOTES, NOTES 2]], source, savedAt, status: {rx: 'delivered'|'missed'}, routific}
  *   source: 'download' (the .xlsx you downloaded), 'file' (a finished file you checked),
  *           'built' (built in the app), 'rebuilt' (rebuilt from the store sheets as a past day)
- *   An RX with no status is not confirmed delivered, so it keeps coming back. */
+ *   An RX with no status on the previous delivery day is not confirmed delivered, so it goes on the
+ *   next master. Only that one day is checked; older days are not carried. */
 
-var PHLO_HISTORY_LOOKBACK = 4;   // past delivery days rebuilt from the store sheets on every build
+var PHLO_HISTORY_LOOKBACK = 1;   // past delivery days checked for missed tickets (and rebuilt on every build)
 var PHLO_HISTORY_KEEP_DAYS = 90; // fully delivered days older than this are dropped
 var PHLO_SOURCE_RANK = { rebuilt: 0, built: 1, file: 2, download: 3 };
 
@@ -122,7 +123,9 @@ function phloUndoMarkRest(hist, iso) {
 function phloOutstanding(hist, iso, currentRows) {
   var onToday = {};
   (currentRows || []).forEach(function (r) { phloRxNumbers(r[0]).forEach(function (n) { onToday[n] = true; }); });
-  var dates = Object.keys(hist.days).filter(function (d) { return d < iso; }).sort();
+  // Only the previous delivery day(s) in the lookback window count; older days are never carried.
+  var look = phloLookbackDays(iso, PHLO_HISTORY_LOOKBACK);
+  var dates = Object.keys(hist.days).filter(function (d) { return look.indexOf(d) >= 0; }).sort();
   var seen = {}; // rx -> {lastIso, row, dates}
   dates.forEach(function (d) {
     hist.days[d].rows.forEach(function (r) {
