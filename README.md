@@ -74,6 +74,11 @@ Patient data never leaves your browser and Google (driver addresses typed in the
 Google Maps for suggestions): the page reads the sheets with your own
 Google sign-in and builds the file locally. Nothing is stored on GitHub.
 
+Patient data is never saved in the browser. The past deliveries are kept only in your Google account
+and shown only while you're signed in. **Sign out** clears the page. (Older versions kept a copy in
+the browser; the page deletes it the first time it opens on that computer.) Downloaded `.xlsx` files
+are in your Downloads folder, so delete them there when you're done with them.
+
 ### Web app setup (one time, about 15 minutes)
 
 **1. Publish the page**

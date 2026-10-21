@@ -92,6 +92,7 @@
   }
 
   function afterSignIn() {
+    state.session = true;
     $('signin').hidden = true;
     $('signout').hidden = false;
     $('build').disabled = false;
@@ -102,14 +103,19 @@
     }).catch(function () { /* not important */ });
   }
 
+  // Signing out reloads the page, which wipes every patient row it was showing (nothing patient-related
+  // is kept in the browser). Waits for any history save to Google first so nothing is lost.
   function signOut() {
-    if (state.token && google.accounts.oauth2.revoke) google.accounts.oauth2.revoke(state.token, function () {});
-    state.token = null;
-    $('signin').hidden = false; $('signout').hidden = true; $('build').disabled = true; $('who').textContent = '';
-    drv.fileId = null; drv.synced = false;
-    hist.fileId = null; hist.synced = false;
-    renderSyncNote();
-    renderHistory();
+    var token = state.token;
+    clearTimeout(hist.timer);
+    var pending = hist.synced || !signedIn() ? Promise.resolve() : pushHistory();
+    $('signout').disabled = true;
+    Promise.resolve(pending).then(function () {
+      if (token && google.accounts.oauth2.revoke) google.accounts.oauth2.revoke(token, function () {});
+      state.token = null;
+      purgeLocalHistory();
+      location.reload();
+    });
   }
 
   function withToken() {
@@ -429,8 +435,8 @@
 
   /* ---------------- delivery history (tickets carried over) ---------------- */
 
-  // Each day's master tickets and which were delivered, saved in the user's Drive appDataFolder
-  // (like the drivers) with a copy in this browser.
+  // Each day's master tickets and which were delivered, saved only in the user's Drive appDataFolder.
+  // It has patient names and addresses, so it is never kept in the browser and only shown while signed in.
   var HISTORY_FILE = 'phlo-history.json';
   var HISTORY_KEY = 'phlo.history';
   var hist = { data: phloHistoryData(null), fileId: null, synced: false, saving: null, pending: false, timer: null, note: '', open: {} };
@@ -446,11 +452,14 @@
     return s + ' - RX ' + c.rx.join(', ');
   }
 
-  function loadLocalHistory() {
-    try { hist.data = phloHistoryData(JSON.parse(localStorage.getItem(HISTORY_KEY) || 'null')); } catch (e) { /* storage blocked or bad JSON */ }
-  }
-  function saveLocalHistory() {
-    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(hist.data)); } catch (e) { /* storage blocked or full */ }
+  /** Older versions kept a copy of the history in this browser. Delete it from storage right away; it stays
+   * in memory (never shown signed out) so it can still be merged into the Google copy if someone signs in now. */
+  function purgeLocalHistory() {
+    try {
+      var old = localStorage.getItem(HISTORY_KEY);
+      localStorage.removeItem(HISTORY_KEY);
+      return old ? phloHistoryData(JSON.parse(old)) : null;
+    } catch (e) { return null; /* storage blocked or bad JSON */ }
   }
 
   function loadHistoryFromDrive() {
@@ -463,12 +472,12 @@
       remote = phloHistoryData(remote);
       var merged = phloMergeHistory(hist.data, remote);
       var changed = JSON.stringify(merged.days) !== JSON.stringify(remote.days);
-      hist.data = merged; saveLocalHistory();
+      hist.data = merged;
       hist.synced = !changed;
       if (changed) pushHistory();
       afterStatusChange(true);
     }).catch(function (e) {
-      hist.note = 'Could not load the delivery history from Google (' + e.message + '). Using this device\'s copy.';
+      hist.note = 'Could not load the delivery history from Google (' + e.message + '). Try signing in again.';
       renderHistory();
     });
   }
@@ -504,7 +513,6 @@
   function commitHistory() {
     phloPruneHistory(hist.data, isoDate(todayLocal()));
     hist.data.updatedAt = new Date().toISOString();
-    saveLocalHistory();
     hist.synced = false;
     clearTimeout(hist.timer);
     if (signedIn()) hist.timer = setTimeout(pushHistory, 800);
@@ -569,6 +577,8 @@
   function renderHistory() {
     var card = $('history-card');
     if (!card) return;
+    card.hidden = !state.session;
+    if (!state.session) return;
     var ref = historyRefIso();
     var days = hist.data.days;
     var look = phloLookbackDays(ref, PHLO_HISTORY_LOOKBACK);
@@ -596,7 +606,7 @@
         'No earlier masters saved yet. Build the master and the past ' + PHLO_HISTORY_LOOKBACK + ' delivery days are rebuilt from the store sheets and saved here.';
     }
     var sync = hist.note || (signedIn() ? (hist.saving ? 'Saving…' : hist.synced ? 'Saved to your Google account.' : 'Not saved to Google yet.') :
-      'Saved on this device only. Sign in to keep it in your Google account.');
+      'Sign in again to save it to your Google account.');
     $('history-sync').textContent = sync;
 
     var ul = $('history');
@@ -1074,7 +1084,8 @@
     $('download-drivers').addEventListener('click', downloadDrivers);
     loadLocalDrivers();
     renderDrivers();
-    loadLocalHistory();
+    var old = purgeLocalHistory();
+    if (old) hist.data = old;
     renderHistory();
     $('date').addEventListener('change', renderHistory);
     $('routific-file').addEventListener('change', function (e) { readRoutificFiles(e.target.files); e.target.value = ''; });
