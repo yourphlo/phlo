@@ -31,11 +31,12 @@ Two ways to run it (same logic, same results):
 ### Past deliveries (tickets carried over)
 
 The **Past deliveries** panel keeps every master's ticket (RX) numbers by delivery date, saved to
-your Google account like the driver profiles. Any ticket that is not confirmed delivered goes back
-on the next master, however old it is, until someone confirms it.
+your Google account like the driver profiles. Only the **previous delivery day** (Sundays skipped)
+is checked: any ticket on it that is not confirmed delivered goes on the next master. Older days
+are not carried.
 
-- **Build master** also rebuilds the past 4 delivery days (Sundays skipped) from the store sheets
-  and saves them, so tickets from earlier days are tracked even before you start downloading.
+- **Build master** also rebuilds the previous delivery day from the store sheets and saves it, so
+  its tickets are tracked even if you didn't download that day's master.
   A master you downloaded or checked in **Check a finished file** is kept instead of the rebuild.
 - Tickets carried over are added to the master, under their store, highlighted with
   "from 10/20". The checks list says when each one was first on a master.
@@ -45,6 +46,7 @@ on the next master, however old it is, until someone confirms it.
     are marked not delivered and stay on the master. If the file has no status column, every
     routed stop counts as delivered.
   - or click **Mark the rest delivered** for a day, or tick single tickets under **Tickets**.
+    Once a day has nothing left unconfirmed the button becomes **Undo mark delivered**.
 - A **Routific summary** (Driver Name, Time, Distance, Number of Stops) has no ticket numbers.
   It is saved with the day and the panel compares its stop count with the master and flags
   unscheduled stops, but it cannot say which tickets were delivered.

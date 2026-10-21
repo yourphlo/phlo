@@ -610,14 +610,7 @@
     var ref = historyRefIso();
     var days = hist.data.days;
     var look = phloLookbackDays(ref, PHLO_HISTORY_LOOKBACK);
-    var show = Object.keys(days).filter(function (iso) {
-      if (iso >= ref) return false;
-      if (look.indexOf(iso) >= 0) return true;
-      var c = phloDayCounts(days[iso]);
-      return c.open + c.missed > 0;
-    });
-    look.forEach(function (iso) { if (show.indexOf(iso) < 0) show.push(iso); });
-    show.sort().reverse();
+    var show = look.slice().sort().reverse(); // only the day(s) checked for missed tickets
 
     var open = phloOutstanding(hist.data, ref, state.built && isoDate(state.built.delivery) === ref ? state.rows.filter(function (r) { return !r.carry; }) : []);
     var openRx = 0; open.forEach(function (o) { openRx += o.rx.length; });
@@ -625,13 +618,14 @@
     var lead = $('history-lead');
     if (openRx) {
       lead.className = 'history-lead warn';
-      lead.textContent = openRx + ' ticket' + (openRx === 1 ? ' is' : 's are') + ' on an earlier master and not confirmed delivered. ' +
+      lead.textContent = openRx + ' ticket' + (openRx === 1 ? ' is' : 's are') + ' on the previous delivery day\'s master and not confirmed delivered. ' +
         (state.built ? 'They are in this master (marked "from …").' : 'Build the master and they are added to it.') +
         ' Drop the Routific export for each day, or tick what was delivered, to take them off.';
     } else {
       lead.className = 'history-lead ok';
-      lead.textContent = Object.keys(days).length ? 'Every ticket on the earlier masters is confirmed delivered or already on this master.' :
-        'No earlier masters saved yet. Build the master and the past ' + PHLO_HISTORY_LOOKBACK + ' delivery days are rebuilt from the store sheets and saved here.';
+      lead.textContent = look.some(function (iso) { return days[iso] && days[iso].rows.length; }) ?
+        'Every ticket on the previous delivery day is confirmed delivered or already on this master.' :
+        'No master saved for the previous delivery day yet. Build the master and it is rebuilt from the store sheets and saved here.';
     }
     var sync = hist.note || (signedIn() ? (hist.saving ? 'Saving…' : hist.synced ? 'Saved to your Google account.' : 'Not saved to Google yet.') :
       'Sign in again to save it to your Google account.');
