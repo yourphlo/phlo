@@ -44,7 +44,9 @@ const MAPS = `(function(){
   g.Geocoder = function(){}; g.Geocoder.prototype.geocode = function(req){
     var key = Object.keys(SPOTS).filter(function(k){ return req.address.toUpperCase().indexOf(k) >= 0; })[0];
     if (!key) return Promise.reject(Object.assign(new Error('ZERO_RESULTS'), { code: 'ZERO_RESULTS' }));
-    return Promise.resolve({ results: [{ formatted_address: req.address.toUpperCase() + ', USA', partial_match: false, types: ['street_address'], geometry: { location: new LL(SPOTS[key][0], SPOTS[key][1]) } }] });
+    // MIDDLE addresses come back as a partial match with Google's own spelling.
+    var partial = key === 'MIDDLE';
+    return Promise.resolve({ results: [{ formatted_address: partial ? '50 MIDDLE ROAD, TOWN, CA 91000, USA' : req.address.toUpperCase() + ', USA', partial_match: partial, types: ['street_address'], geometry: { location: new LL(SPOTS[key][0], SPOTS[key][1]) } }] });
   };
   g.importLibrary = function(){ return Promise.resolve(g); };
   setTimeout(function(){ window.__phloMapsLoaded(); }, 0);
@@ -137,7 +139,12 @@ async function setup(page, errors) {
   await office.waitForSelector('#dp-routes-card:not([hidden])');
   const flags = await office.$$eval('#dp-flags li', l => l.map(x => x.textContent));
   check(flags.some(t => t.includes('NOE,CY') && t.includes('not found')), 'flag: address not found');
-  check(flags.length === 1, 'Check before sending lists only address problems (overlaps are not flagged): ' + JSON.stringify(flags));
+  check(flags.length === 2, 'Check before sending lists only address problems (overlaps are not flagged): ' + JSON.stringify(flags));
+  check(flags.some(t => t.includes('KAY,BO') && t.includes('uses the address it found: 50 MIDDLE ROAD') && t.includes('Pharmacy wrote: 50 MIDDLE RD TOWN CA 91000')), 'partial match uses Google\'s address and shows the pharmacy\'s');
+  await office.click('.dp-route summary >> text=Ana Ruiz');
+  const kayRow = await office.textContent('.dp-route[data-id="a"] tbody tr:has-text("KAY,BO")');
+  check(kayRow.includes('50 MIDDLE ROAD, TOWN, CA 91000, USA') && kayRow.includes('Pharmacy wrote: 50 MIDDLE RD TOWN CA 91000'), 'route list shows both addresses');
+  await office.click('.dp-route summary >> text=Ana Ruiz');
   const sums = await office.$$eval('.dp-route summary', l => l.map(x => x.textContent));
   console.log('     routes:', sums);
   check(sums[0].includes('Ana Ruiz') && sums[0].includes('3 stops') && sums[0].includes('8:00 AM'), 'Ana gets the west stops + overlap, starts 8:00');
@@ -145,9 +152,9 @@ async function setup(page, errors) {
   check(routesCalls === 2, 'Google road times asked once per driver (' + routesCalls + ')');
   check(sums.some(t => t.includes('Not on a route') && t.includes('1 stop')), 'unfound stop listed as not on a route');
   // Fix the address.
-  await office.fill('.dp-fix input', '60 WILLOW AVE TOWN CA 91000');
-  await office.click('.dp-fix .btn');
-  await office.waitForFunction(() => !document.querySelector('.dp-fix'));
+  await office.fill('#dp-flags li:has-text("NOE,CY") .dp-fix input', '60 WILLOW AVE TOWN CA 91000');
+  await office.click('#dp-flags li:has-text("NOE,CY") .dp-fix .btn');
+  await office.waitForFunction(() => ![...document.querySelectorAll('#dp-flags li')].some(li => li.textContent.includes('NOE,CY')));
   check((await office.$$eval('.dp-route summary', l => l.map(x => x.textContent)))[0].includes('4 stops'), 'fixed address joins Ana\'s route');
   // Move a stop to Bo.
   await office.click('.dp-route summary >> text=Ana Ruiz');
@@ -191,6 +198,7 @@ async function setup(page, errors) {
   await office.evaluate(() => { window.print = () => { window.__printed = document.querySelectorAll('#print-area .print-page').length; }; });
   await office.click('#dp-print');
   check(await office.evaluate(() => window.__printed) === 2, 'print makes one page per driver');
+  check((await office.textContent('#print-area')).includes('Pharmacy wrote: 50 MIDDLE RD TOWN CA 91000'), 'printout keeps the pharmacy\'s address');
   if (shots) await office.screenshot({ path: path.join(shots, 'dispatch.png'), fullPage: true });
   // Send.
   await office.click('#dp-send');
@@ -212,6 +220,8 @@ async function setup(page, errors) {
   await phone.waitForSelector('.dv-stop');
   const dstops = await phone.$$eval('.dv-stop .nm', l => l.map(x => x.textContent));
   check(dstops.length === 3 && !dstops.some(t => /POE|LEE/.test(t)), 'Ana sees only her 3 stops: ' + dstops.join(' | '));
+  const kay = await phone.textContent('.dv-stop:has-text("KAY,BO")');
+  check(kay.includes('50 MIDDLE ROAD, TOWN, CA 91000, USA') && kay.includes('Pharmacy wrote: 50 MIDDLE RD TOWN CA 91000'), 'driver gets Google\'s address plus the pharmacy\'s');
   check(await phone.isHidden('#tabs') && await phone.isHidden('#view-master'), 'driver sees no office tabs');
   if (shots) await phone.screenshot({ path: path.join(shots, 'driver-list.png'), fullPage: true });
   await phone.click('.dv-stop.next');
