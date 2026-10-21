@@ -30,9 +30,15 @@ const MAPS = `(function(){
   window.google = window.google || {}; var g = google.maps = {};
   var SPOTS = { 'WEST': [34.05, -118.15], 'WILLOW': [34.06, -118.12], 'EAST': [34.05, -117.85], 'ELM': [34.04, -117.88], 'MIDDLE': [34.05, -118.02] };
   function LL(a,b){ this.a=a; this.b=b; } LL.prototype.lat=function(){return this.a}; LL.prototype.lng=function(){return this.b};
-  function Thing(o){ this.o=o||{}; this.map=this.o.map; } Thing.prototype = { setMap(m){this.map=m}, addListener(){}, setOptions(){}, setContent(){}, open(){}, getPath(){ return { push(){} }; } };
+  function Thing(o){ this.o=o||{}; this.map=this.o.map; this.ls={}; } Thing.prototype = { setMap(m){this.map=m}, addListener(n,f){this.ls[n]=f}, setOptions(){}, setContent(){}, open(){}, close(){}, setIcon(i){this.icon=i}, setZIndex(){}, getPath(){ return { push(){} }; } };
+  window.__markers = []; var M = function(o){ Thing.call(this,o); __markers.push(this); }; M.prototype = Thing.prototype;
+  // 1px = 0.001 degrees; the map's top-left corner is (34.5, -118.5).
+  g.LatLng = function(a,b){ this.a=a; this.b=b; }; g.LatLng.prototype = LL.prototype;
+  g.OverlayView = function(){}; g.OverlayView.prototype = { setMap(){ this.ready = true; }, getProjection(){ return this.ready ? {
+    fromLatLngToContainerPixel: function(ll){ return { x: (ll.lng() + 118.5) * 1000, y: (34.5 - ll.lat()) * 1000 }; },
+    fromContainerPixelToLatLng: function(p){ return new LL(34.5 - p.y / 1000, -118.5 + p.x / 1000); } } : null; } };
   g.Map = function(div,o){ this.z=o.zoom; window.__maps=(window.__maps||0)+1; }; g.Map.prototype = { setOptions(){}, fitBounds(){}, setCenter(){}, setZoom(z){this.z=z}, getZoom(){return this.z}, panTo(){} };
-  g.Marker = Thing; g.Polygon = Thing; g.Polyline = Thing; g.InfoWindow = Thing; g.OverlayView = function(){}; g.OverlayView.prototype = { setMap(){}, getProjection(){ return null; } };
+  g.Marker = M; g.Polygon = Thing; g.Polyline = Thing; g.InfoWindow = Thing;
   g.SymbolPath = { CIRCLE: 0, BACKWARD_CLOSED_ARROW: 3 }; g.Point = function(){};
   g.LatLngBounds = function(){}; g.LatLngBounds.prototype = { extend(){}, getCenter(){ return {}; } };
   g.Geocoder = function(){}; g.Geocoder.prototype.geocode = function(req){
@@ -148,6 +154,39 @@ async function setup(page, errors) {
   await office.selectOption('.dp-route[data-id="a"] tbody tr:first-child select', 'b');
   await office.waitForFunction(() => document.querySelector('.dp-route[data-id="b"] summary').textContent.includes('3 stops'));
   check(true, 'moved a stop to Bo');
+  // Select tool: loop around Bo's two east stops (EAST -117.85, ELM -117.88 => x 620-650, y 450-460) and give them to Ana.
+  await office.click('[data-dptool="select"]');
+  check(await office.isVisible('#dp-sel-help') && await office.isVisible('#dp-draw'), 'select mode shows help and the drawing layer');
+  const mb = await office.locator('#dp-draw').boundingBox();
+  const loop = [[600, 430], [680, 430], [680, 480], [600, 480], [600, 432]];
+  await office.mouse.move(mb.x + loop[0][0], mb.y + loop[0][1]); await office.mouse.down();
+  for (const [x, y] of loop.slice(1)) await office.mouse.move(mb.x + x, mb.y + y, { steps: 5 });
+  await office.mouse.up();
+  const mb2 = await office.locator('#dp-draw').boundingBox();
+  check(Math.abs(mb2.y - mb.y) < 1, 'map does not move when stops get selected (' + (mb2.y - mb.y) + 'px)');
+  check((await office.textContent('#dp-sel-count')).startsWith('2 stops selected (Bo)'), 'loop selects 2 stops: ' + await office.textContent('#dp-sel-count'));
+  // Tap Ana's WEST stop (-118.15, 34.05 => x 350, y 450) to add it, then tap again to remove it.
+  await office.mouse.click(mb.x + 352, mb.y + 451);
+  check((await office.textContent('#dp-sel-count')).startsWith('3 stops selected'), 'tap adds a stop');
+  await office.mouse.click(mb.x + 352, mb.y + 451);
+  check((await office.textContent('#dp-sel-count')).startsWith('2 stops selected'), 'tap again removes it');
+  check(await office.evaluate(() => __markers.filter(m => m.map && m.icon && m.icon.strokeColor === '#111111').length) === 2, 'selected stops are highlighted');
+  if (shots) await office.locator('#dp-map-card').screenshot({ path: path.join(shots, 'select.png') });
+  check(await office.inputValue('#dp-sel-driver') === 'a', 'driver list starts on a driver who does not have these stops');
+  await office.selectOption('#dp-sel-driver', 'a');
+  await office.click('#dp-sel-apply');
+  await office.waitForFunction(() => document.querySelector('.dp-route[data-id="b"] summary').textContent.includes('1 stop'));
+  check((await office.textContent('.dp-route[data-id="a"] summary')).includes('5 stops') && await office.isHidden('#dp-sel'), 'Move stops gives both to Ana and clears the selection');
+  // And back to Bo.
+  await office.mouse.move(mb.x + loop[0][0], mb.y + loop[0][1]); await office.mouse.down();
+  for (const [x, y] of loop.slice(1)) await office.mouse.move(mb.x + x, mb.y + y, { steps: 5 });
+  await office.mouse.up();
+  await office.selectOption('#dp-sel-driver', 'b');
+  await office.click('#dp-sel-apply');
+  await office.waitForFunction(() => document.querySelector('.dp-route[data-id="b"] summary').textContent.includes('3 stops'));
+  check(true, 'moved them back to Bo');
+  await office.click('[data-dptool="move"]');
+  check(await office.isHidden('#dp-draw'), 'Move mode hides the drawing layer');
   // Print.
   await office.evaluate(() => { window.print = () => { window.__printed = document.querySelectorAll('#print-area .print-page').length; }; });
   await office.click('#dp-print');

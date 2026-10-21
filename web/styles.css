@@ -308,6 +308,12 @@ img.sig { object-fit: contain; }
 .pins-table { margin: 4px 0; }
 .pins-table td:last-child { font: 600 16px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 2px; }
 
+.dp-tools { align-items: center; min-height: 40px; }
+.dp-sel { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; font-size: 14px; }
+.dp-sel select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 8px; }
+.dp-sel .btn { padding: 8px 12px; }
+#dp-sel-help { margin: 0 0 10px; }
+
 /* printed route sheets: only the print area prints */
 .print-area { display: none; }
 @media print {

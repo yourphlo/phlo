@@ -90,6 +90,9 @@ on the Drivers tab for the delivery date) and sends each driver their route.
    after a driver's hours. Click one to see it on the map.
 3. To move a stop, pick another driver in its **Driver** list (in the route list or by clicking it on
    the map). Both routes are re-planned.
+   To move many at once, click **Select stops** above the map, draw a loop around the stops (or tap
+   stops to add or remove them), pick a driver and click **Move stops**. **Move** goes back to
+   panning the map; **Clear** (or Esc) empties the selection.
 4. **Print routes** prints one sheet per driver with boxes for the outcome, copay and a signature.
 5. **Send to drivers** sends the routes to the driver app. Sending again replaces the routes;
    anything drivers already recorded is kept.
