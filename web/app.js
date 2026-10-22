@@ -249,7 +249,8 @@
       text.addEventListener('input', update);
       clear.addEventListener('click', function () { text.value = ''; update(); text.focus(); });
       list.appendChild(el('div', { class: 'paste-store' }, [
-        el('div', { class: 'paste-head' }, [el('span', { class: 'code', text: store.code }), count, clear]),
+        el('div', { class: 'paste-head' }, [el('span', { class: 'code', text: store.code }),
+          el('span', { class: 'muted small', text: store.title || '' }), count, clear]),
         text
       ]));
       pasteBoxes[store.code] = text;
@@ -292,6 +293,11 @@
       ]));
       var read = pasted(store, delivery) || readStore(store, delivery);
       return read.then(function (r) {
+        if (!r && !store.id && !store.search) { // paste-only store with an empty box
+          status.className = 'status warn'; status.textContent = 'nothing pasted';
+          meta.textContent = 'paste its cells under Paste cells, then Build master again';
+          return { store: store, rows: [], problem: 'Nothing pasted' };
+        }
         if (!r) {
           status.className = 'status warn'; status.textContent = 'no file found';
           return { store: store, rows: [], problem: 'No sheet found in Drive' };

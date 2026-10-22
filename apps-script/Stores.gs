@@ -22,7 +22,9 @@ var MASTER_HEADERS = ['NAME', 'ADDRESS', 'NOTES', 'NOTES 2'];
  * xlsx        the source is an .xlsx file in Drive, not a Google Sheet
  * search      find the file by name (newest match) instead of a fixed id
  * tabPerDay   one tab per pickup day named like "Mon 10/19/26"
- * paste       the page has a box to paste this store's cells into (for a sheet that isn't in Google Drive)
+ * paste       the page has a box to paste this store's cells into (for a sheet that isn't in Google Drive).
+ *             A store with paste but no id or search is paste only: its rows come from the box alone.
+ * addressNext when the name cell holds no address, take it from the column right after the name
  */
 var STORES = [
   { code: 'VALLEY', title: '986 VLY#8012 PHLO LIST',
@@ -68,6 +70,11 @@ var STORES = [
   // TX lists Phlo's care-home stops on its "PHLO" tab: a "10/20" row in column C starts each block.
   { code: 'TX', title: 'TX DELIVERY 2026 (PHLO tab)',
     id: '1XHk4mLQNIgWs6FHRFUTsgHOIaQ_09LxtM3MrUg96qqM', tab: { name: 'PHLO' }, nameNotes: true,
-    cols: { date: 2, id: 3, name: 2, address: 4, bags: 5, fridge: 6, notes: [7] } }
+    cols: { date: 2, id: 3, name: 2, address: 4, bags: 5, fridge: 6, notes: [7] } },
+  // Santa Ana's sheet isn't in Google Drive: paste its cells on the page. The columns line up on the
+  // RX numbers wherever they are; the patient follows them, then the address (or both in one cell),
+  // then notes, copay and fridge in any order.
+  { code: 'SA', title: 'SANTA ANA (paste cells)', paste: true, addressNext: true,
+    cols: { id: 0, name: 1, notes: [2, 3, 4, 5, 6, 7] } }
 ];
 

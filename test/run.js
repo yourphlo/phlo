@@ -92,6 +92,20 @@ eq(p.rxCol, 1, 'BP paste from column B');
 eq(ctx.phloStoreRows(p.values, p.store, monday), bpWant, 'BP pasted from column B');
 eq(ctx.phloPasted('just\ttext\nno numbers', bpStore, monday).rx, 0, 'paste without RX numbers');
 
+// Santa Ana: paste only, columns line up on the RX numbers; address in the name cell or the next column.
+const saStore = ctx.STORES.find(s => s.code === 'SA');
+eq([!!saStore.paste, saStore.id, saStore.search], [true, undefined, undefined], 'SA is paste only');
+p = ctx.phloPasted([
+  'DATE\tRX #\tPATIENT\tADDRESS\tCOPAY\tNOTES',
+  '10/18/2026\t1000041\tPAT,SA ONE\t30 MAIN ST SANTA ANA CA 92701\t$2.50\tleave at door',
+  '10/18/2026\t1000042\tPAT,SA TWO, 40 BRISTOL ST SANTA ANA CA 92703\t\tFRIDGE',
+].join('\n'), saStore, monday);
+eq([p.rx, p.rxCol], [2, 1], 'SA paste: RX column B');
+eq(ctx.phloStoreRows(p.values, p.store, monday), [
+  ['1000041,PAT,SA ONE', '30 MAIN ST SANTA ANA CA 92701', 'SA', '$2.50-leave at door'],
+  ['1000042,PAT,SA TWO', '40 BRISTOL ST SANTA ANA CA 92703', 'SA', 'FRIDGE'],
+], 'SA pasted cells');
+
 const checks = ctx.phloCheckRows([
   ['1000010, 1000011,V 1000012, A,B, & C,D', '600 BIRCH AVE APT 5 TOWN CA 91000', 'EM', ''],
   ['1000013,X,Y', '700 ASH AVE APT 1 TOWN CA 910002', 'WT DME', ''],

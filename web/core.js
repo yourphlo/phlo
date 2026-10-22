@@ -229,12 +229,18 @@ function phloExtract(values, store, delivery) {
     var ids = idText.match(/\d{5,}/g) || [];
     var na = addrText ? [nameText.replace(/[\s,]+$/, '').trim(), phloCleanAddress(addrText)] : phloSplitNameAddress(nameText);
     if (!na[0]) return;
+    var addrCol = -1;
+    if (store.addressNext && !na[1] && c.name !== undefined && /^\s*\d+[A-Z]?\s+\S/i.test(cell(c.name + 1))) {
+      addrCol = c.name + 1; // "NAME" then "123 MAIN ST ..." in the next column
+      addrText = cell(addrCol);
+      na[1] = phloCleanAddress(addrText);
+    }
     if (store.nameNotes) { // "MOUNTAIN CREST ***DELIVER FROM 8AM TO 5PM ONLY***" -> note
       var starNotes = [];
       na[0] = na[0].replace(/\*{2,}\s*([^*]+?)\s*\*{2,}/g, function (_, t) { starNotes.push(t); return ' '; }).replace(/\s+/g, ' ').trim();
     }
 
-    var notesRaw = (c.notes || []).map(cell).filter(function (n) { return n.trim() !== ''; });
+    var notesRaw = (c.notes || []).filter(function (i) { return i !== addrCol; }).map(cell).filter(function (n) { return n.trim() !== ''; });
     var explicit = null;
     notesRaw.some(function (n) { explicit = phloExplicitDate(n, delivery); return !!explicit; });
 
