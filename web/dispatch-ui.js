@@ -4,6 +4,8 @@
  *   3. Orders each route (our own planner, then Google's road-time optimizer) and times it.
  *   4. Map + route lists to check and move stops, printable route sheets, "Send to drivers",
  *      and a live view of what drivers record at each stop.
+ *   5. Patient texts: each stop's mobile number and language (sent with the routes), what patients
+ *      answered, pharmacy approvals, messages to drivers, and the texting settings.
  * Uses window.PHLO (app.js), phloMaps (maps.js), phloBackend (backend.js) and dispatch.js. */
 (function () {
   'use strict';
@@ -15,7 +17,9 @@
   var geoCache = {};       // address -> {lat, lng, partial, formatted} | {none: true}, for this page visit only
   var plan = null;         // {iso, stops, drivers, routes, warnings}
   var dmap = { map: null, loading: null, markers: [], lines: [], areas: [], info: null, ov: null, tool: 'move', sel: {}, lasso: null };
-  var live = { timer: null, busy: false };
+  var live = { timer: null, busy: false, last: null };
+  // Patients' mobile numbers and languages by patient key (phloPatientKey): saved on the dispatch server, or typed here.
+  var contacts = { saved: {}, typed: {} };
 
   // Check before sending lists address problems only; who takes which stop is checked by hand.
   var FLAG_TEXT = {
@@ -55,6 +59,7 @@
     $('dp-plan').disabled = !A.built() || !rows.length || !ws.length;
     $('dp-send').title = phloBackend.enabled ? '' : 'Set up the dispatch server first (README: Driver app)';
     $('dp-live-card').hidden = !phloBackend.enabled;
+    $('dp-text-card').hidden = !phloBackend.enabled;
     if (!$('dp-live-date').value) $('dp-live-date').value = iso || A.isoDate(A.todayLocal());
   }
 
@@ -200,6 +205,7 @@
     var stops = rows.map(function (row, i) {
       var info = phloStopInfo(row);
       return { id: phloStopId(row), row: i, name: String(row[0] || ''), address: String(row[1] || ''), typed: String(row[1] || ''), store: info.store,
+        key: phloPatientKey(row[0], row[1]), sheetPhone: A.sheetPhone(row),
         notes: String(row[3] || ''), copay: info.copay, tags: info.tags, lat: null, lng: null, flags: [],
         // "only Jorge can deliver" in the note: only Jorge gets it (all drivers, so we can say who is missing).
         only: phloNoteDrivers(row[3], A.drivers().map(function (d) { return { id: d.id, name: d.name, username: d.username }; })) };
@@ -266,6 +272,50 @@
     });
   }
 
+  /* ---------------- patient mobile numbers + languages ---------------- */
+
+  /** A stop's mobile number and language: typed here, else saved from an earlier day, else from the pharmacy's sheet. */
+  function contactOf(s) {
+    var k = s.key || s.id;
+    var c = contacts.typed[k] || contacts.saved[k];
+    if (c) return { phone: c.phone || '', lang: phloLang(c.lang), from: contacts.typed[k] ? 'typed' : 'saved' };
+    return { phone: s.sheetPhone || '', lang: 'en', from: s.sheetPhone ? 'sheet' : '' };
+  }
+
+  /** Fetches the numbers and languages saved on the dispatch server for the planned stops. */
+  function loadContacts() {
+    var token = A.token();
+    if (!plan || !phloBackend.enabled || !token) return;
+    var keys = plan.stops.map(function (s) { return s.key; }).filter(function (k) { return k && !contacts.saved[k]; });
+    if (!keys.length) return;
+    phloBackend.call('admin.patients', { googleToken: token, keys: keys }).then(function (r) {
+      Object.keys(r.patients || {}).forEach(function (k) { contacts.saved[k] = r.patients[k]; });
+      if (plan) renderRoutes();
+    }).catch(function () { /* the boxes stay as they are */ });
+  }
+
+  /** The route list's "Texts" cell: the patient's mobile number and the language for their texts. */
+  function textCell(s) {
+    var c = contactOf(s), k = s.key || s.id;
+    var e164 = phloE164(c.phone);
+    var phone = el('input', { type: 'tel', class: 'dp-phone', value: e164 ? phloPhoneShow(e164) : c.phone, placeholder: 'Mobile',
+      'aria-label': 'Mobile number for ' + s.name, autocomplete: 'off' });
+    var lang = el('select', { 'aria-label': 'Text language for ' + s.name });
+    PHLO_LANGS.forEach(function (l) {
+      var o = el('option', { value: l.code, text: l.name.split(' (')[0] });
+      if (l.code === c.lang) o.selected = true;
+      lang.appendChild(o);
+    });
+    var mark = function () { phone.setAttribute('aria-invalid', phone.value.trim() && !phloE164(phone.value) ? 'true' : 'false'); };
+    var save = function () { mark(); contacts.typed[k] = { phone: phone.value.trim(), lang: lang.value }; };
+    phone.addEventListener('change', save);
+    lang.addEventListener('change', save);
+    mark();
+    var td = el('td', { class: 'dp-text' }, [phone, lang]);
+    if (c.from === 'sheet') td.title = 'Number from the pharmacy\'s sheet';
+    return td;
+  }
+
   function afterPlan() {
     var gErr = plan.drivers.map(function (d) { return plan.routes[d.id].googleError; }).filter(Boolean);
     note(gErr.length ? 'Google road times were not available (' + gErr[0] + '), so times are estimates. Plan again to retry.' : '');
@@ -274,6 +324,7 @@
     renderFlags();
     renderRoutes();
     renderMap();
+    loadContacts();
   }
 
   /** Moves a stop to another driver (or back to "nobody") and re-plans the routes it left and joined. */
@@ -400,6 +451,8 @@
       var sum = list.length + ' stop' + (list.length === 1 ? '' : 's') +
         (sch && list.length ? ' · ' + phloClock(sch.start) + '–' + phloClock(sch.finish) + ' · driving ' + fmtMin(sch.driveMin) + (r.km ? ' (' + Math.round(r.km * 0.621) + ' mi)' : '') : '') +
         (r.estimated && list.length ? ' · estimated' : '');
+      var noPhone = list.filter(function (s) { return !phloE164(contactOf(s).phone); }).length;
+      if (noPhone && list.length) sum += ' · ' + noPhone + ' without a mobile number';
       var warn = [];
       if (list.length > maxStops(d)) warn.push('over the max of ' + maxStops(d));
       if (sch && sch.late.length) warn.push(sch.late.length + ' late');
@@ -410,19 +463,20 @@
       var tb = el('tbody');
       list.forEach(function (s, i) {
         var lunch = sch && sch.lunchBefore === i;
-        if (lunch) tb.appendChild(el('tr', {}, [el('td', { class: 'num', text: '' }), el('td', { class: 'eta muted', text: 'Lunch' }), el('td', { colspan: '4', class: 'muted', text: phloClock(d.src.lunchFrom) + '–' + phloClock(d.src.lunchTo) + ' break' })]));
+        if (lunch) tb.appendChild(el('tr', {}, [el('td', { class: 'num', text: '' }), el('td', { class: 'eta muted', text: 'Lunch' }), el('td', { colspan: '5', class: 'muted', text: phloClock(d.src.lunchFrom) + '–' + phloClock(d.src.lunchTo) + ' break' })]));
         tb.appendChild(el('tr', { class: (s.flags.length ? 'flagged ' : '') + (s.late ? 'late' : '') }, [
           el('td', { class: 'num', text: String(i + 1) }),
           el('td', { class: 'eta', text: phloClock(s.eta) }),
           el('td', { class: 'code', text: s.name }),
           addrCell(s),
           el('td', {}, [[s.store, s.notes].filter(Boolean).join(' · '), s.onlyNote && !s.manual ? el('span', { class: 'chip', text: 'Only ' + onlyNames(s) + ' (note)' }) : null]),
+          textCell(s),
           el('td', {}, [moveSelect(s)])
         ]));
       });
-      if (!list.length) tb.appendChild(el('tr', {}, [el('td', { colspan: '6', class: 'muted', text: 'No stops.' })]));
+      if (!list.length) tb.appendChild(el('tr', {}, [el('td', { colspan: '7', class: 'muted', text: 'No stops.' })]));
       det.appendChild(el('div', { class: 'table-wrap' }, [el('table', {}, [
-        el('thead', {}, [el('tr', {}, ['#', 'ETA', 'NAME', 'ADDRESS', 'NOTES', 'DRIVER'].map(function (h) { return el('th', { text: h }); }))]), tb
+        el('thead', {}, [el('tr', {}, ['#', 'ETA', 'NAME', 'ADDRESS', 'NOTES', 'TEXTS', 'DRIVER'].map(function (h) { return el('th', { text: h }); }))]), tb
       ])]));
       box.appendChild(det);
     });
@@ -695,6 +749,11 @@
     var msg = 'Send ' + plan.drivers.filter(function (d) { return plan.routes[d.id].stopIds.length; }).length + ' routes for ' + A.niceDate(A.fromIso(plan.iso)) + ' to the drivers?';
     if (flagged) msg += '\n\n' + flagged + ' stop' + (flagged === 1 ? '\'s address was' : 's\' addresses were') + ' not found on Google Maps (see "Check before sending").';
     if (off) msg += '\n' + off + ' stop' + (off === 1 ? ' is' : 's are') + ' not on any route and will not be sent.';
+    var onRoutes = plan.stops.filter(function (s) { return s.driverId; });
+    var badPhone = onRoutes.filter(function (s) { var p = contactOf(s).phone; return p && !phloE164(p); }).length;
+    var noPhone = onRoutes.filter(function (s) { return !contactOf(s).phone; }).length;
+    if (badPhone) msg += '\n' + badPhone + ' mobile number' + (badPhone === 1 ? ' does' : 's do') + ' not look right (marked red under TEXTS): they won\'t get texts.';
+    if (noPhone) msg += '\n' + noPhone + ' stop' + (noPhone === 1 ? ' has' : 's have') + ' no mobile number: they won\'t get texts.';
     msg += '\n\nSending again later replaces these routes; what drivers already recorded is kept.';
     if (!confirm(msg)) return;
     var byId = {}; plan.stops.forEach(function (s) { byId[s.id] = s; });
@@ -703,22 +762,25 @@
       return {
         driverId: d.id, driverName: d.name, startAddress: d.src.startAddress, endAddress: d.src.endAddress,
         start: r.schedule.start, finish: r.schedule.finish,
+        serviceMin: $('dp-service').value === '' ? DISPATCH_DEFAULTS.serviceMin : +$('dp-service').value,
         stops: r.stopIds.map(function (id, i) {
-          var s = byId[id];
+          var s = byId[id], c = contactOf(s);
           // The driver gets the address Google found; the pharmacy's original rides in the notes when it differs.
           return { id: s.id, seq: i + 1, name: s.name, address: useAddr(s), store: s.store, notes: [typedNote(s), s.notes].filter(Boolean).join(' · '),
-            copay: s.copay, tags: s.tags, eta: s.eta, lat: s.lat, lng: s.lng };
+            copay: s.copay, tags: s.tags, eta: s.eta, lat: s.lat, lng: s.lng,
+            phone: phloE164(c.phone), lang: c.lang, key: s.key };
         })
       };
     });
     $('dp-send').disabled = true;
     note('Sending routes…');
     phloBackend.call('admin.syncDrivers', { googleToken: token, drivers: A.drivers().map(function (d) {
-      return { id: d.id, name: d.name, username: phloLoginName(d), salt: d.pinSalt, hash: d.pinHash };
+      return { id: d.id, name: d.name, username: phloLoginName(d), salt: d.pinSalt, hash: d.pinHash, mobile: d.mobile };
     }) }).then(function () {
       return phloBackend.call('admin.publish', { googleToken: token, date: plan.iso, routes: routes });
-    }).then(function () {
-      note('');
+    }).then(function (res) {
+      note(res.texting ? '' : 'Routes sent. Patients will not get texts until texting is set up (Texting settings, at the bottom).');
+      routes.forEach(function (r) { r.stops.forEach(function (s) { if (s.key && s.phone) contacts.saved[s.key] = { phone: s.phone, lang: s.lang }; }); });
       var noPin = plan.drivers.filter(function (d) { return plan.routes[d.id].stopIds.length && !d.src.pinHash; }).map(function (d) { return d.name; });
       toast('Sent ' + routes.length + ' routes.' + (noPin.length ? ' No app PIN yet: ' + noPin.join(', ') + ' (Drivers tab).' : ''));
       $('dp-live-date').value = plan.iso;
@@ -740,6 +802,7 @@
     if (!iso) return;
     live.busy = true;
     phloBackend.call('admin.status', { googleToken: token, date: iso }).then(function (r) {
+      live.last = r;
       renderLive(r);
     }).catch(function (e) {
       $('dp-live-note').textContent = 'Could not load deliveries: ' + e.message;
@@ -753,7 +816,9 @@
     if (!r.plan) { noteEl.textContent = 'No routes sent for ' + A.niceDate(A.fromIso(r.date)) + ' yet.'; $('dp-live-count').textContent = ''; return; }
     noteEl.textContent = 'Sent ' + new Date(r.plan.publishedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) +
       ' · updated ' + new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) + ' (refreshes every minute)';
-    var colors = A.colors(), allDone = 0, allStops = 0;
+    var colors = A.colors(), allDone = 0, allStops = 0, waiting = 0;
+    var texts = r.texts || { stops: {}, msgs: [] };
+    if (!r.texting) noteEl.textContent += ' · Patient texts are off: texting is not set up (Texting settings, below).';
     r.plan.routes.forEach(function (route) {
       var ok = 0, bad = 0, cash = 0;
       route.stops.forEach(function (s) {
@@ -789,6 +854,9 @@
         } else {
           right.appendChild(el('span', { class: 'muted', text: s.eta ? 'ETA ' + phloClock(s.eta) : '' }));
         }
+        var t = texts.stops[s.id] || {};
+        if (t.approval && t.approval.status === 'pending' && !u) waiting++;
+        textBits(r.date, s, t, texts.msgs.filter(function (m) { return m.stopId === s.id; }), u, what, right);
         ul.appendChild(el('li', {}, [el('span', { class: 'seq', text: String(s.seq) }), what, right]));
       });
       box.appendChild(el('div', { class: 'live-route' }, [
@@ -797,7 +865,83 @@
         bar, ul
       ]));
     });
-    $('dp-live-count').textContent = allDone + ' of ' + allStops + ' done';
+    $('dp-live-count').textContent = allDone + ' of ' + allStops + ' done' + (waiting ? ' · ' + waiting + ' need pharmacy OK' : '');
+  }
+
+  function hhmm(iso) { return iso ? new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : ''; }
+
+  /** A stop's texting in the Deliveries list: texted or not, what the patient answered, the pharmacy's OK, messages to the driver. */
+  function textBits(date, s, t, msgs, u, what, right) {
+    var chips = el('span', { class: 'chips' });
+    var lastOut = (t.log || []).filter(function (l) { return l.dir === 'out' && l.kind === 'eta'; }).pop();
+    if (!t.phone) chips.appendChild(el('span', { class: 'chip muted-chip', text: 'No mobile' }));
+    else if (t.optOut) chips.appendChild(el('span', { class: 'chip bad', text: 'Patient stopped texts (STOP)' }));
+    else if (lastOut) chips.appendChild(el('span', { class: 'chip ' + (lastOut.ok ? '' : 'bad'), text: lastOut.ok ? 'Texted ' + hhmm(lastOut.at) + ' (' + t.etaMin + ' min)' : 'Text not sent: ' + lastOut.err }));
+    else if (!u) chips.appendChild(el('span', { class: 'chip muted-chip', text: 'Not texted yet' }));
+    if (t.request) {
+      chips.appendChild(el('span', { class: 'chip warn', text: 'Patient: ' + phloRequestText(t.request) }));
+      if (t.approval) chips.appendChild(approvalChip(t.approval));
+    }
+    msgs.forEach(function (m) {
+      chips.appendChild(el('span', { class: 'chip', text: 'To driver: ' + m.text + ' · ' + (m.readAt ? 'read ' + hhmm(m.readAt) : 'not read yet') + (m.texted ? '' : ' (app only)') }));
+    });
+    if (chips.childNodes.length) { what.appendChild(el('br')); what.appendChild(chips); }
+    var btn = function (text, fn) { var b = el('button', { class: 'linkish', type: 'button', text: text }); b.addEventListener('click', fn); right.appendChild(b); };
+    if (t.approval && t.approval.status === 'pending' && !u) btn('Approve / decline', function () { askApproval(date, s, t); });
+    if (!u) btn('Message driver', function () { askMessage(date, s); });
+    if ((t.log || []).length) btn('Texts', function () { showTexts(s, t); });
+    if (t.phone && !u && !t.optOut) btn(lastOut ? 'Text again' : 'Text now', function () { textNow(date, s, !!lastOut); });
+  }
+
+  function approvalChip(a) {
+    if (a.status === 'approved') return el('span', { class: 'chip ok', text: 'OK\'d by ' + a.by + ', ' + a.position });
+    if (a.status === 'declined') return el('span', { class: 'chip bad', text: 'Pharmacy said no' + (a.by ? ' (' + a.by + ')' : '') });
+    return el('span', { class: 'chip bad', text: 'Needs pharmacy OK' + (a.asked ? ' (asked: ' + a.asked + ')' : '') });
+  }
+
+  function askApproval(date, s, t) {
+    phloAsk.approval({ title: s.name, request: phloRequestText(t.request), note: 'Approve only with the pharmacy\'s OK: type the name and position of the pharmacy staff who gave it.' }, function (ans) {
+      var token = A.token();
+      if (!token) { A.signIn(); return Promise.reject(new Error('Sign in with Google first.')); }
+      return phloBackend.call('admin.approve', { googleToken: token, date: date, stopId: s.id, ok: ans.ok, by: ans.by, position: ans.position }).then(function () {
+        toast(ans.ok ? 'Approved. The patient and driver were told.' : 'Declined. The patient and driver were told.');
+        refreshLive();
+      });
+    });
+  }
+
+  function askMessage(date, s) {
+    phloAsk.message({ title: s.name, seq: s.seq }, function (ans) {
+      var token = A.token();
+      if (!token) { A.signIn(); return Promise.reject(new Error('Sign in with Google first.')); }
+      return phloBackend.call('admin.message', { googleToken: token, date: date, stopId: s.id, reason: ans.reason, other: ans.other }).then(function (r) {
+        toast(r.msg.texted ? 'Sent to the driver (app + text).' : 'Sent to the driver app (' + r.msg.err + ')');
+        refreshLive();
+      });
+    });
+  }
+
+  function textNow(date, s, again) {
+    var token = A.token();
+    if (!token) { A.signIn(); return; }
+    if (again && !confirm('Text this patient the "driver is on the way" message again?')) return;
+    phloBackend.call('admin.textNow', { googleToken: token, date: date, stopId: s.id }).then(function (r) {
+      toast(r.sent.ok ? 'Texted.' : 'Not sent: ' + r.sent.err);
+      refreshLive();
+    }).catch(function (e) { toast('Could not text: ' + e.message); });
+  }
+
+  function showTexts(s, t) {
+    var list = $('texts-log');
+    list.textContent = '';
+    $('texts-title').textContent = s.name + (t.phone ? ' · ' + phloPhoneShow(t.phone) : '') + ' · ' + (PHLO_LANGS.filter(function (l) { return l.code === t.lang; })[0] || PHLO_LANGS[0]).name;
+    (t.log || []).forEach(function (l) {
+      list.appendChild(el('li', { class: l.dir === 'in' ? 'in' : 'out' }, [
+        el('span', { class: 'muted small', text: (l.dir === 'in' ? 'Patient' : 'PHLO') + ' · ' + hhmm(l.at) + (l.dir === 'out' && !l.ok ? ' · not sent: ' + l.err : '') }),
+        el('span', { text: l.text })
+      ]));
+    });
+    $('texts-dialog').showModal();
   }
 
   function showFile(fileId, title) {
@@ -809,6 +953,62 @@
     phloBackend.call('admin.file', { googleToken: token, fileId: fileId }).then(function (r) {
       $('img-full').src = r.dataUrl;
     }).catch(function (e) { $('img-dialog').close(); toast('Could not open it: ' + e.message); });
+  }
+
+  /* ---------------- texting settings ---------------- */
+
+  /** Loads (or saves, when `set` is given) the texting settings and shows them. */
+  function textSettings(set) {
+    var token = A.token();
+    if (!token) { $('ts-status').textContent = 'Sign in with Google to see the texting settings.'; return Promise.resolve(); }
+    $('ts-save').disabled = true;
+    return phloBackend.call('admin.textSettings', { googleToken: token, set: set || null }).then(function (r) {
+      renderTextSettings(r);
+      if (set) toast('Texting settings saved.');
+    }).catch(function (e) {
+      $('ts-status').textContent = (set ? 'Not saved: ' : 'Could not load the settings: ') + e.message;
+    }).then(function () { $('ts-save').disabled = false; });
+  }
+
+  function renderTextSettings(r) {
+    $('ts-status').textContent = r.ready ? 'Texting is on. Texts come from ' + r.from + '.' :
+      'Texting is not set up yet: patients get no texts. Follow "Patient texts" in apps-script-dispatch/README.md (Twilio).';
+    $('ts-status').className = 'small ' + (r.ready ? 'good' : 'bad');
+    $('ts-lead').value = r.leadMin;
+    $('ts-hook').value = r.hookUrl || '';
+    var tb = $('ts-rx');
+    tb.textContent = '';
+    var codes = STORES.map(function (st) { return st.code; });
+    Object.keys(r.pharmacies).forEach(function (c) { if (codes.indexOf(c) < 0) codes.push(c); });
+    codes.forEach(function (c) {
+      var p = r.pharmacies[c] || {};
+      var input = function (name, type, value, ph) { return el('input', { name: name, type: type, value: value || '', placeholder: ph, autocomplete: 'off', 'aria-label': ph + ' for ' + c }); };
+      var pin = input('pin', 'text', '', p.hasPin ? 'New PIN (has one)' : 'PIN, 4-8 digits');
+      pin.setAttribute('inputmode', 'numeric');
+      var clear = el('label', { class: 'small muted' }, [el('input', { type: 'checkbox', name: 'clearPin' }), ' remove PIN']);
+      tb.appendChild(el('tr', { 'data-code': c }, [
+        el('td', { class: 'code', text: c }),
+        el('td', {}, [input('phone', 'tel', p.phone ? phloPhoneShow(p.phone) : '', 'Mobile for texts')]),
+        el('td', {}, [input('email', 'email', p.email, 'Email')]),
+        el('td', {}, [pin, p.hasPin ? clear : null])
+      ]));
+    });
+  }
+
+  function saveTextSettings(e) {
+    e.preventDefault();
+    var pharmacies = {}, bad = [];
+    $('ts-rx').querySelectorAll('tr').forEach(function (tr) {
+      var f = function (n) { var i = tr.querySelector('[name="' + n + '"]'); return i ? (i.type === 'checkbox' ? i.checked : i.value.trim()) : ''; };
+      var c = tr.getAttribute('data-code');
+      if (f('phone') && !phloE164(f('phone'))) bad.push(c + ': the mobile number does not look right');
+      if (f('pin') && !/^\d{4,8}$/.test(f('pin'))) bad.push(c + ': the PIN must be 4 to 8 digits');
+      if (f('phone') || f('email') || f('pin') || tr.querySelector('[name="clearPin"]') && !f('clearPin')) {
+        pharmacies[c] = { phone: f('phone'), email: f('email'), pin: f('pin'), clearPin: f('clearPin') };
+      }
+    });
+    if (bad.length) { toast(bad.join('; ')); return; }
+    textSettings({ leadMin: $('ts-lead').value, pharmacies: pharmacies });
   }
 
   function startLive() {
@@ -826,6 +1026,12 @@
     $('dp-print').addEventListener('click', printRoutes);
     $('dp-send').addEventListener('click', sendRoutes);
     $('dp-live-refresh').addEventListener('click', refreshLive);
+    $('ts-form').addEventListener('submit', saveTextSettings);
+    $('dp-text-card').addEventListener('toggle', function () { if ($('dp-text-card').open) textSettings(); });
+    $('ts-copy').addEventListener('click', function () {
+      var v = $('ts-hook').value;
+      if (v && navigator.clipboard) navigator.clipboard.writeText(v).then(function () { toast('Copied.'); });
+    });
     document.querySelectorAll('[data-dptool]').forEach(function (b) { b.addEventListener('click', function () { setDpTool(b.getAttribute('data-dptool')); }); });
     $('dp-sel-apply').addEventListener('click', applySel);
     $('dp-sel-clear').addEventListener('click', clearSel);

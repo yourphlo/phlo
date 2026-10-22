@@ -76,6 +76,12 @@ function phloPickTabs(names, delivery, tabOpt) {
 
 var PHLO_PHONE = /,?\s*\(?\b\d{3}\)?[\s.\-]?\d{3}[\s.\-]\d{4}\b/g;
 
+/** The first phone number written in a cell ("DOE,JANE|1 A ST|(626) 555-0100" -> "(626) 555-0100"), else ''. */
+function phloFindPhone(text) {
+  var m = String(text || '').match(/\(?\b[2-9]\d{2}\)?[\s.\-]?\d{3}[\s.\-]\d{4}\b/);
+  return m ? m[0].trim() : '';
+}
+
 function phloCleanAddress(a) {
   return String(a || '')
     .replace(PHLO_PHONE, ' ')
@@ -233,7 +239,8 @@ function phloExtract(values, store, delivery) {
     notesRaw.some(function (n) { explicit = phloExplicitDate(n, delivery); return !!explicit; });
 
     var entry = {
-      ids: ids, name: na[0], address: na[1], copay: '', fridge: false, notes: [], combo: false
+      ids: ids, name: na[0], address: na[1], copay: '', fridge: false, notes: [], combo: false,
+      phone: phloFindPhone(nameText) || phloFindPhone(addrText)
     };
     var copayCell = c.copay !== undefined ? cell(c.copay) : '';
     entry.copay = phloMoney(copayCell);
@@ -269,6 +276,15 @@ function phloExtract(values, store, delivery) {
   var flat = [];
   entries.forEach(function (e) { flat.push(e); e.extra.forEach(function (x) { x.cont = true; flat.push(x); }); });
   return flat;
+}
+
+/** Patients' phone numbers written in a store's sheet, by RX number: {"1000001": "(626) 555-0100"}. */
+function phloStorePhones(values, store, delivery) {
+  var out = {};
+  phloExtract(values, store, delivery).forEach(function (e) {
+    if (e.phone) e.ids.forEach(function (id) { if (!out[id]) out[id] = e.phone; });
+  });
+  return out;
 }
 
 /** Key that matches two addresses at the same house/unit despite small spelling differences. */

@@ -297,10 +297,11 @@
           return { store: store, rows: [], problem: 'No sheet found in Drive' };
         }
         var rows = phloStoreRows(r.values, r.store || store, delivery);
+        var phones = phloStorePhones(r.values, r.store || store, delivery);
         status.className = 'status ' + (rows.length ? 'ok' : 'warn');
         status.textContent = rows.length + ' row' + (rows.length === 1 ? '' : 's');
         meta.textContent = [relTime(r.file.modifiedTime), r.tabs.join(', ') || r.note].filter(Boolean).join(' · ');
-        return { store: store, rows: rows, problem: rows.length ? '' : 'Nothing for this date yet' + (r.note ? ' (' + r.note + ')' : '') };
+        return { store: store, rows: rows, phones: phones, problem: rows.length ? '' : 'Nothing for this date yet' + (r.note ? ' (' + r.note + ')' : '') };
       }).catch(function (e) {
         status.className = 'status error'; status.textContent = 'error';
         meta.textContent = e.message;
@@ -311,7 +312,11 @@
     Promise.all(results).then(function (all) {
       state.built = { delivery: delivery, stores: all };
       state.rows = [];
-      all.forEach(function (r) { state.rows = state.rows.concat(r.rows); });
+      state.phones = {};
+      all.forEach(function (r) {
+        state.rows = state.rows.concat(r.rows);
+        Object.keys(r.phones || {}).forEach(function (rx) { state.phones[rx] = r.phones[rx]; });
+      });
       renderTable();
       runChecks();
       $('download').disabled = !state.rows.length;
@@ -1085,6 +1090,11 @@
     token: function () { return signedIn() ? state.token : null; },
     signIn: signIn,
     rows: function () { return state.rows; },
+    /** A phone number the pharmacy wrote in its sheet for a master row's patient, else ''. */
+    sheetPhone: function (row) {
+      var rx = phloRxNumbers(row[0]).filter(function (n) { return state.phones && state.phones[n]; })[0];
+      return rx ? state.phones[rx] : '';
+    },
     deliveryIso: function () { return state.built ? isoDate(state.built.delivery) : $('date').value; },
     built: function () { return !!state.built; },
     drivers: function () { return drv.data.drivers; },

@@ -1,5 +1,8 @@
 /* PHLO driver app: a driver signs in with their name + PIN and sees only their own route.
  * At each stop they record the outcome, how it was left, copay collected, a photo and a signature.
+ * They also see what each patient answered to the "driver is on the way" text (not home, someone else will
+ * receive it, leave it at the door once the pharmacy OKs it...) and messages from the office or a pharmacy
+ * ("Please RTS to RX ..."). Tapping Navigate tells the server they're on the way, which starts the patient texts.
  * Talks only to the dispatch server (backend.js). The route is kept in memory only; the browser
  * just remembers the sign-in. */
 (function () {
@@ -13,6 +16,37 @@
   var photo = null;  // new photo (data URL) for the open stop
   var sig = { ctx: null, ink: false, drawing: false };
   var refreshTimer = null;
+  var startedFor = null; // the date we told the server the driver started
+
+  /** What the patient answered for a stop, and the pharmacy's OK: {request, approval, texted} or null. */
+  function patientOf(s) { return data && data.texts && data.texts[s.id] || null; }
+
+  /** The pharmacy OK'd leaving this stop without a signature. */
+  function leaveOk(s) {
+    var p = patientOf(s);
+    return !!(p && p.request && phloNeedsApproval(p.request.choice) && p.approval && p.approval.status === 'approved');
+  }
+
+  /** A chip for the patient's answer: [text, class]. */
+  function patientChip(p) {
+    if (!p || !p.request) return null;
+    var t = 'Patient: ' + phloRequestText(p.request), cls = 'warn';
+    if (p.request.choice === 'redeliver' || p.request.choice === 'refuse') cls = 'bad';
+    if (p.request.choice === 'someone') cls = 'ok';
+    if (p.approval) {
+      if (p.approval.status === 'approved') { t += ' · OK\'d by ' + p.approval.by + ', ' + p.approval.position + ' · photo required'; cls = 'ok'; }
+      else if (p.approval.status === 'declined') { t += ' · pharmacy said NO: needs a signature'; cls = 'bad'; }
+      else t += ' · waiting for the pharmacy\'s OK';
+    }
+    return [t, cls];
+  }
+
+  /** Tells the server the driver is on the way (once a day): patients start getting texts. */
+  function started() {
+    if (!me || !data || !data.route || data.date !== data.today || startedFor === data.date || data.started) return;
+    startedFor = data.date;
+    phloBackend.call('driver.start', { session: me.session, date: data.date }).catch(function () { startedFor = null; });
+  }
 
   function el(tag, attrs, children) {
     var n = document.createElement(tag);
@@ -121,10 +155,14 @@
     var nav = $('dv-next');
     nav.hidden = !next;
     if (next) { nav.href = phloNavUrl(next); nav.textContent = 'Navigate to stop ' + next.seq; }
+    renderMsgs();
     stops.forEach(function (s) {
       var u = data.updates[s.id];
       var chips = el('div', { class: 'chips' });
       if (u) chips.appendChild(el('span', { class: 'chip ' + (u.status === 'delivered' ? 'ok' : 'bad'), text: u.status === 'delivered' ? 'Delivered' : 'Not delivered' }));
+      (data.msgs || []).forEach(function (m) { if (m.stopId === s.id) chips.appendChild(el('span', { class: 'chip bad', text: m.text })); });
+      var pc = !u && patientChip(patientOf(s));
+      if (pc) chips.appendChild(el('span', { class: 'chip ' + pc[1], text: pc[0] }));
       if (s.copay) chips.appendChild(el('span', { class: 'chip warn', text: 'Copay ' + s.copay }));
       s.tags.forEach(function (t) { chips.appendChild(el('span', { class: 'chip', text: t })); });
       if (s.store) chips.appendChild(el('span', { class: 'chip', text: s.store }));
@@ -137,6 +175,31 @@
       ]);
       btn.addEventListener('click', function () { openStop(s); });
       list.appendChild(el('li', {}, [btn]));
+    });
+  }
+
+  /** Messages from the office or a pharmacy, newest first; unread ones have a "Got it" button. */
+  function renderMsgs() {
+    var msgs = (data.msgs || []).slice().reverse();
+    var box = $('dv-msgs'), list = $('dv-msg-list');
+    list.textContent = '';
+    box.hidden = !msgs.length;
+    msgs.forEach(function (m) {
+      var li = el('li', { class: m.readAt ? 'read' : '' }, [
+        el('span', {}, [el('b', { text: 'Stop ' + m.seq + ': ' }), m.text]),
+        el('span', { class: 'muted small', text: m.from + ' · ' + new Date(m.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) })
+      ]);
+      if (!m.readAt) {
+        var ok = el('button', { type: 'button', class: 'btn primary', text: 'Got it' });
+        ok.addEventListener('click', function () {
+          ok.disabled = true;
+          phloBackend.call('driver.ack', { session: me.session, date: data.date, msgId: m.id }).then(function (r) {
+            m.readAt = r.msg.readAt; renderMsgs();
+          }).catch(function (x) { ok.disabled = false; toast(x.message); });
+        });
+        li.appendChild(ok);
+      }
+      list.appendChild(li);
     });
   }
 
@@ -155,11 +218,23 @@
     if (s.copay) meta.appendChild(el('span', { class: 'chip warn', text: 'Copay due ' + s.copay }));
     s.tags.forEach(function (t) { meta.appendChild(el('span', { class: 'chip', text: t })); });
     if (s.notes) meta.appendChild(el('span', { class: 'chip', text: s.notes }));
+    var pbox = $('dv-patient'), pc = patientChip(patientOf(s));
+    var msgs = (data.msgs || []).filter(function (m) { return m.stopId === s.id; });
+    pbox.textContent = '';
+    if (pc) pbox.appendChild(el('p', { class: 'chip ' + pc[1], text: pc[0] }));
+    msgs.forEach(function (m) { pbox.appendChild(el('p', { class: 'chip bad', text: m.text + ' (' + m.from + ')' })); });
+    pbox.hidden = !pbox.childNodes.length;
     $('dv-nav').href = phloNavUrl(s);
     var st = u ? u.status : 'delivered';
     Array.prototype.forEach.call(f.elements.status, function (r) { r.checked = r.value === st; });
     Array.prototype.forEach.call(f.elements.methods, function (c) { c.checked = !!u && u.methods.indexOf(c.value) >= 0; });
     f.elements.approvedBy.value = u ? u.approvedBy : '';
+    if (!u && leaveOk(s)) {
+      // The pharmacy OK'd leaving it: start the form that way (the driver can still change it).
+      var p = patientOf(s);
+      Array.prototype.forEach.call(f.elements.methods, function (c) { c.checked = c.value === p.request.choice || c.value === 'approved'; });
+      f.elements.approvedBy.value = p.approval.by + ' (' + p.approval.position + ')';
+    }
     f.elements.copayCollected.value = u ? u.copayCollected : '';
     $('dv-copay-field').hidden = !s.copay && !(u && u.copayCollected);
     f.elements.note.value = u ? u.note : '';
@@ -204,7 +279,11 @@
       copayCollected: f.elements.copayCollected.value.trim(),
       note: f.elements.note.value.trim()
     };
-    var errs = phloCheckUpdate(u);
+    var errs = phloCheckUpdate(u, {
+      leaveApproved: leaveOk(s),
+      hasPhoto: !!photo || !!old.photoId,
+      hasSignature: sig.ink || (!!old.signatureId && $('dv-sig').hidden)
+    });
     var box = $('dv-errors');
     box.textContent = '';
     if (errs.length) {
@@ -292,11 +371,13 @@
   /* ---------------- wire up ---------------- */
 
   document.addEventListener('DOMContentLoaded', function () {
-    if (!phloBackend.enabled) return;
+    if (!phloBackend.enabled || /^#t=/.test(location.hash)) return;
     $('driver-login').hidden = false;
     $('driver-login').addEventListener('submit', login);
     $('driver-signout').addEventListener('click', function () { logout(false); });
     $('dv-refresh').addEventListener('click', load);
+    $('dv-next').addEventListener('click', started);
+    $('dv-nav').addEventListener('click', started);
     $('dv-form').addEventListener('submit', save);
     $('dv-close').addEventListener('click', closeStop);
     $('dv-cancel').addEventListener('click', closeStop);

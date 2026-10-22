@@ -11,7 +11,7 @@ try { ({ chromium } = require('playwright')); } catch (e) {
 const root = path.join(__dirname, '..');
 const shots = process.argv[2];
 const DISPATCH = 'https://script.google.com/macros/s/fake/exec';
-const server = require('./fake-apps-script')({ adminTokens: { fake: 'yourphlo@gmail.com' }, today: '2026-10-22' });
+const server = require('./fake-apps-script')({ adminTokens: { fake: 'yourphlo@gmail.com' }, today: '2026-10-22', twilio: true });
 
 const web = http.createServer((req, res) => {
   const f = path.join(root, 'web', decodeURIComponent(req.url.split('?')[0]).replace(/^\/$/, '/index.html'));
@@ -165,7 +165,7 @@ async function setup(page, errors) {
   check((await office.$$eval('.dp-route summary', l => l.map(x => x.textContent)))[0].includes('4 stops'), 'fixed address joins Ana\'s route');
   // Move a stop to Bo.
   await office.click('.dp-route summary >> text=Ana Ruiz');
-  await office.selectOption('.dp-route[data-id="a"] tbody tr:first-child select', 'b');
+  await office.selectOption('.dp-route[data-id="a"] tbody tr:first-child select[aria-label^="Driver for"]', 'b');
   await office.waitForFunction(() => document.querySelector('.dp-route[data-id="b"] summary').textContent.includes('3 stops'));
   check(true, 'moved a stop to Bo');
   // Select tool: loop around Bo's two east stops (EAST -117.85, ELM -117.88 => x 620-650, y 450-460) and give them to Ana.
@@ -208,6 +208,22 @@ async function setup(page, errors) {
   check(await office.evaluate(() => window.__printed) === 2, 'print makes one page per driver');
   check((await office.textContent('#print-area')).includes('Pharmacy wrote: 50 MIDDLE RD TOWN CA 91000'), 'printout keeps the pharmacy\'s address');
   if (shots) await office.screenshot({ path: path.join(shots, 'dispatch.png'), fullPage: true });
+  // Patient texts: DOE gets texts in Spanish; BP pharmacy gets a sign-in PIN.
+  await office.evaluate(() => { document.querySelector('.dp-route[data-id="a"]').open = true; });
+  await office.fill('.dp-route[data-id="a"] tr:has-text("DOE,JANE") .dp-phone', '626-555-01');
+  await office.dispatchEvent('.dp-route[data-id="a"] tr:has-text("DOE,JANE") .dp-phone', 'change');
+  check(await office.getAttribute('.dp-route[data-id="a"] tr:has-text("DOE,JANE") .dp-phone', 'aria-invalid') === 'true', 'texts: a short mobile number is marked');
+  await office.fill('.dp-route[data-id="a"] tr:has-text("DOE,JANE") .dp-phone', '(626) 555-0101');
+  await office.dispatchEvent('.dp-route[data-id="a"] tr:has-text("DOE,JANE") .dp-phone', 'change');
+  await office.selectOption('.dp-route[data-id="a"] tr:has-text("DOE,JANE") select[aria-label^="Text language"]', 'es');
+  await office.click('#dp-text-card summary');
+  await office.waitForSelector('#ts-rx tr[data-code="BP"]');
+  check((await office.textContent('#ts-status')).includes('Texting is on'), 'texts: settings say texting is on');
+  await office.fill('#ts-rx tr[data-code="BP"] [name="phone"]', '626 555 0300');
+  await office.fill('#ts-rx tr[data-code="BP"] [name="pin"]', '2468');
+  await office.click('#ts-save');
+  await office.waitForFunction(() => (document.querySelector('#ts-rx tr[data-code="BP"] [name="pin"]') || {}).placeholder === 'New PIN (has one)');
+  check(JSON.parse(server.props.rxAccounts).bp.hash.length === 64, 'texts: BP pharmacy PIN saved on the server');
   // Send.
   await office.click('#dp-send');
   await office.waitForFunction(() => document.querySelector('#dp-live-count').textContent.includes('0 of 6'));
@@ -260,6 +276,87 @@ async function setup(page, errors) {
   await office.waitForFunction(() => (document.getElementById('img-full').src || '').startsWith('data:image/png'));
   check(true, 'office opens the signature');
   await office.keyboard.press('Escape');
+
+  /* ---- patient texts ---- */
+  check(!Object.values(server.files).some(f => f.name.startsWith('routes-') && String(f.content).includes('5550101')), 'texts: the phone number is not in the routes file');
+  await office.click('#dp-live li:has-text("DOE,JANE") .linkish:text-matches("Text (now|again)")');
+  await office.waitForFunction(() => document.querySelector('#dp-live').textContent.includes('Texted '));
+  const toDoe = server.sms.filter(m => m.to === '+16265550101');
+  check(toDoe.length >= 1 && toDoe[0].body.startsWith('Entrega de farmacia PHLO'), 'texts: DOE texted in Spanish');
+  const token = toDoe[0].body.match(/#t=(\w+)/)[1];
+  // The patient opens the link and asks to leave it at the front door.
+  const perrors = [];
+  const patient = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await setup(patient, perrors);
+  await patient.goto(base + '#t=' + token);
+  await patient.waitForSelector('.pt-option');
+  check((await patient.textContent('#pt-title')) === 'Su entrega de farmacia' && (await patient.textContent('#pt-when')).startsWith('Entrega el jueves'), 'texts: reply page in Spanish');
+  check(await patient.isHidden('#locked') && await patient.isHidden('#tabs') && !(await patient.textContent('body')).includes('DOE'), 'texts: reply page shows no sign-in, tabs or name');
+  await patient.click('.pt-option[data-choice="door"]');
+  check((await patient.textContent('#pt-body')).includes('Su farmacia debe aprobarlo primero'), 'texts: door choice says the pharmacy must approve');
+  await patient.click('#pt-body button[type=submit]');
+  await patient.waitForSelector('#pt-status:not([hidden])');
+  check((await patient.textContent('#pt-status')).includes('Esperando la aprobación de su farmacia'), 'texts: patient sees it waits for the pharmacy: ' + await patient.textContent('#pt-status'));
+  await patient.selectOption('#pt-lang', 'zh');
+  check((await patient.textContent('#pt-title')) === '您的药房送货', 'texts: patient switches to Chinese');
+  if (shots) await patient.screenshot({ path: path.join(shots, 'patient.png'), fullPage: true });
+  // The pharmacy signs in and approves.
+  const rxerrors = [];
+  const rx = await browser.newPage({ viewport: { width: 1000, height: 900 } });
+  await setup(rx, rxerrors);
+  await rx.goto(base);
+  await rx.fill('#rx-login [name="store"]', 'bp');
+  await rx.fill('#rx-login [name="pin"]', '2468');
+  await rx.click('#rx-login button[type=submit]');
+  await rx.waitForSelector('#rx-stops li');
+  const rxTxt = await rx.textContent('#rx-stops');
+  check(rxTxt.includes('DOE,JANE') && rxTxt.includes('Patient: Leave at front door') && rxTxt.includes('Needs your OK'), 'texts: pharmacy sees the request');
+  check((await rx.textContent('#rx-count')).includes('1 need your OK') && await rx.isHidden('#tabs'), 'texts: pharmacy page, no office tabs');
+  if (shots) await rx.screenshot({ path: path.join(shots, 'pharmacy.png'), fullPage: true });
+  await rx.click('#rx-stops li:has-text("DOE,JANE") .btn:has-text("Approve / decline")');
+  await rx.click('#ask-approve [data-ok="1"]');
+  check(await rx.isVisible('#ask-approve .form-errors li:has-text("name and position")'), 'texts: approval needs name + position');
+  await rx.fill('#ask-approve [name="by"]', 'Jane Kim');
+  await rx.fill('#ask-approve [name="position"]', 'Pharmacist');
+  await rx.click('#ask-approve [data-ok="1"]');
+  await rx.waitForFunction(() => document.querySelector('#rx-stops').textContent.includes('OK\'d by Jane Kim, Pharmacist'));
+  check(server.sms.some(m => m.to === '+16265550101' && m.body.startsWith('您的药房已批准将药品放在前门')), 'texts: patient told it was approved, in the language they picked (Chinese)');
+  // The office asks Ana to bring KAY back.
+  await office.click('#dp-live-refresh');
+  await office.waitForFunction(() => document.querySelector('#dp-live').textContent.includes('OK\'d by Jane Kim'));
+  await office.click('#dp-live li:has-text("KAY,BO") .linkish:has-text("Message driver")');
+  await office.click('#ask-message [data-send]');
+  check(await office.isVisible('#ask-message .form-errors li:has-text("Pick a reason")'), 'texts: message needs a reason');
+  await office.check('#ask-message input[value="pickup"]');
+  await office.click('#ask-message [data-send]');
+  await office.waitForFunction(() => document.querySelector('#dp-live').textContent.includes('To driver: Please RTS to RX [1000005, KAY,BO]: PT will pick up @ RX instead'));
+  check(server.sms.some(m => m.to === '+15555550100' && m.body.includes('Please RTS to RX [1000005, KAY,BO]')), 'texts: driver texted the RTS message');
+  // Ana's phone: the message, the approval, and a photo is required.
+  await phone.click('#dv-refresh');
+  await phone.waitForSelector('#dv-msgs:not([hidden])');
+  check((await phone.textContent('#dv-msgs')).includes('Please RTS to RX [1000005, KAY,BO]'), 'texts: driver sees the message');
+  await phone.click('#dv-msg-list .btn:has-text("Got it")');
+  await phone.waitForFunction(() => !document.querySelector('#dv-msg-list .btn'));
+  check((await phone.textContent('.dv-stop:has-text("DOE,JANE")')).includes('OK\'d by Jane Kim, Pharmacist'), 'texts: driver sees the pharmacy OK on the stop');
+  await phone.click('.dv-stop:has-text("DOE,JANE")');
+  check(await phone.isChecked('#dv-form input[value="door"]') && await phone.isChecked('#dv-form input[value="approved"]') &&
+    (await phone.inputValue('#dv-form [name="approvedBy"]')) === 'Jane Kim (Pharmacist)', 'texts: form starts as front door, approved by the pharmacist');
+  if (await phone.isVisible('#dv-copay-field')) await phone.fill('#dv-form [name="copayCollected"]', '5.00');
+  await phone.click('#dv-save');
+  check(await phone.isVisible('#dv-errors li:has-text("photo is required")'), 'texts: photo required');
+  await phone.setInputFiles('#dv-photo', { name: 'p.png', mimeType: 'image/png', buffer: png });
+  await phone.waitForSelector('#dv-photo-preview:not([hidden])');
+  await phone.click('#dv-save');
+  await phone.waitForFunction(() => !document.getElementById('dv-stop').open);
+  check((await phone.textContent('#dv-sub')).includes('2 of 3 done'), 'texts: saved with the photo');
+  await rx.click('#rx-refresh');
+  await rx.waitForSelector('#rx-stops li:has-text("DOE,JANE") .linkish:has-text("Photo")');
+  await rx.click('#rx-stops li:has-text("DOE,JANE") .linkish:has-text("Photo")');
+  await rx.waitForFunction(() => (document.getElementById('img-full').src || '').startsWith('data:image/'));
+  check(true, 'texts: pharmacy sees the drop-off photo');
+  check(!perrors.length && !rxerrors.length, 'no page errors (patient, pharmacy) ' + JSON.stringify(perrors.concat(rxerrors)));
+  await office.click('#dp-live-refresh');
+  await office.waitForTimeout(500);
   if (shots) await office.screenshot({ path: path.join(shots, 'live.png'), fullPage: true });
 
   /* ---- a note that names a driver ---- */
