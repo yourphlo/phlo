@@ -24,6 +24,10 @@ Two ways to run it (same logic, same results):
    (Saturday's and Sunday's tabs for a Monday). The app finds the RX number column by itself, so the
    copy doesn't have to start at column A. A full box replaces the Google Drive search for BP; leave it
    empty to use Drive as before. Pasted cells are never saved and disappear when you sign out or reload.
+   **Santa Ana:** its sheet isn't in Google Drive, so it only comes in through the **SA** box under
+   **Paste cells**: copy the day's rows from Santa Ana's sheet and paste them there. The RX number column
+   is found by itself; the patient name is the next column, with the address in the same cell or the one
+   after it. Left empty, Santa Ana shows "nothing pasted" and adds no rows.
 3. Each store shows how many rows it gave and when its sheet was last updated. A store with
    0 rows or "no file found" probably hasn't entered its list yet.
 4. Go through **Check before uploading**: missing RX numbers, stray letters in RX numbers,

@@ -57,7 +57,7 @@ function buildMaster(delivery) {
   STORES.forEach(function (store) {
     try {
       var values = phloReadStore(store, delivery);
-      if (!values) { log.push(store.code + ': source not found (skipped)'); return; }
+      if (!values) { log.push(store.code + (store.id || store.search ? ': source not found (skipped)' : ': paste its cells on the web page (skipped)')); return; }
       var out = phloStoreRows(values, store, delivery);
       rows = rows.concat(out);
       log.push(store.code + ': ' + out.length + ' row(s)');
