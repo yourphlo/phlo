@@ -115,6 +115,52 @@ on the Drivers tab for the delivery date) and sends each driver their route.
 6. **Deliveries** at the bottom shows each driver's progress live (refreshes every minute): delivered
    or not, how it was left, who approved it, copay collected, notes, and the photo and signature.
 
+### Patient texts
+
+When a driver is about **30 minutes** from a stop, PHLO texts the patient (in their language):
+"your driver is about 25 minutes away (around 10:40 AM)", with a link and reply numbers:
+
+1. Not home, redeliver another day (day and time)
+2. I do not want my medications
+3. Someone else will receive it (name and relation)
+4. Leave at the front door
+5. Leave in the mailbox
+
+Patients answer by texting the number (`1 Friday after 3pm`, `3 Maria, daughter`) or by tapping the link,
+which opens a short page in their language with buttons. Each answer is sent right away to the driver (app
+and text), the office (Deliveries list) and the pharmacy (pharmacy page).
+
+- **4 and 5 (no signature) need the pharmacy's OK.** The pharmacy gets a text and/or email and approves or
+  declines on the pharmacy page, typing the **name and position** of the staff member (the office can also do
+  it from the Deliveries list after calling the pharmacy). The patient and driver are told. The driver's form
+  then starts as "front door / mailbox, approved by …", and a **photo is required** to save it without a
+  signature.
+- **When the texts go out:** once the driver taps **Navigate** (or records a stop), the arrival times move by
+  however late or early they are running, and each patient is texted once when they are within 30 minutes.
+  Change the 30 under **Dispatch > Texting settings**. Patients who answered 1 or 2 are not texted.
+- **Mobile numbers and languages:** in the **TEXTS** column of each route (Dispatch tab). A number the
+  pharmacy wrote in its sheet is filled in by itself; what you type is saved when you send routes and filled
+  in again next time for the same patient and address. A number marked red doesn't look right and won't get
+  texts. A patient can also switch language on their page.
+- **Deliveries list:** each stop shows whether the patient was texted, their answer, the pharmacy's OK, and
+  messages sent to the driver. **Texts** shows the whole conversation, **Text now** sends the "on the way"
+  text by hand, **Message driver** sends "Please RTS to RX [RX#, name]" with a reason (PT will pick up @ RX
+  instead / RX needs to repack/fill more meds / other).
+- Texts never include the medication. The pharmacy's text has the RX number, not the name. Drivers don't
+  see patients' phone numbers. Patients who reply STOP get no more texts.
+
+Texting needs a Twilio account: see "Patient texts" in `apps-script-dispatch/README.md`. Until then nothing
+is texted and each stop says "Text not sent".
+
+### Pharmacy page
+
+Pharmacies open the same page and use **Pharmacy sign-in** with their store code (`VALLEY`, `BP`...) and the
+PIN you set under **Dispatch > Texting settings** (where you also put the mobile number and/or email that
+gets "approval needed" messages). They see only their own deliveries for a day: driver, arrival time,
+outcome, the drop-off photo and signature, and what the patient answered. They can **Approve / decline**
+leave-at-the-door requests and **Return to pharmacy** a stop (the driver gets the message in the app and by
+text).
+
 ### Driver app
 
 Drivers open the same page on their phone (`https://yourphlo.github.io/phlo/`) and use
@@ -125,6 +171,10 @@ the next stop. At each stop they tap the stop and record:
 - **Delivered** or **Not delivered** (a reason is required),
 - **Left in mailbox**, **Left at front door** and/or **Approved by pharmacy staff** (with the name),
 - **Copay collected**, a **photo** and the patient's **signature**, and a note.
+
+Messages from the office or a pharmacy ("Please RTS to RX ...") show at the top with a **Got it** button,
+and each stop shows what the patient answered by text (and the pharmacy's OK). Give drivers a mobile number
+on the Drivers tab to also get these as texts. Tapping **Navigate** starts the patients' "on the way" texts.
 
 They stay signed in on that phone for 16 hours. Five wrong PINs lock that username for 15 minutes.
 Removing a driver or their PIN signs them out.
@@ -265,7 +315,7 @@ name (`OCT 2026`, `October 2026`, `RX OCT 2026`, `OCT-2026`, …).
   against local sheet snapshots in `test/fixtures/` when present (kept out of git because
   they hold patient data).
 - `node test/dispatch-e2e.js [screenshot-dir]` - plans, prints and sends routes, then signs in as a
-  driver and records a delivery, in Chromium with Google and the dispatch server faked (the real
+  driver and records a delivery, texts a patient, answers on the reply page, approves on the pharmacy page, in Chromium with Google and the dispatch server faked (the real
   `Server.gs` runs on stand-ins for Apps Script; needs Playwright).
 - `XLSX_JS=path/to/xlsx.full.min.js node test/e2e.js [file.xlsx]` - drives the web app in
   Chromium with Google's APIs faked from those snapshots (needs Playwright).

@@ -431,12 +431,26 @@ var DELIVERY_METHODS = [
   { value: 'approved', label: 'Approved by pharmacy staff' }
 ];
 
-/** Problems with a driver's stop update: [message]. Approved needs the staff name; not delivered needs a reason. */
-function phloCheckUpdate(u) {
+/**
+ * Problems with a driver's stop update: [message]. Approved needs the staff name; not delivered needs a reason.
+ * ctx (optional): {leaveApproved, hasPhoto, hasSignature}. When the pharmacy OK'd leaving it without a signature
+ * (the patient asked by text), a delivery with no signature needs a photo.
+ */
+function phloCheckUpdate(u, ctx) {
   var errs = [];
+  ctx = ctx || {};
+  if (ctx.leaveApproved && u.status === 'delivered' && !ctx.hasSignature && !ctx.hasPhoto)
+    errs.push('Take a photo of where you left it: the pharmacy OK\'d leaving it without a signature, so a photo is required.');
   if (u.status !== 'delivered' && u.status !== 'failed') errs.push('Pick Delivered or Not delivered.');
   if ((u.methods || []).indexOf('approved') >= 0 && !phloCleanText(u.approvedBy)) errs.push('Type the name of the pharmacy staff who approved it.');
   if (u.status === 'failed' && !phloCleanText(u.note)) errs.push('Say why it was not delivered.');
   if (u.copayCollected && !/^\$?\d+(\.\d{1,2})?$/.test(String(u.copayCollected).trim())) errs.push('Copay collected should be an amount like 5.00.');
   return errs;
+}
+
+/** Who a stop is for, to remember their mobile number and language between days: first patient's name + address. */
+function phloPatientKey(name, address) {
+  var first = String(name || '').replace(/^[\d,\s]+/, '').split('&')[0].toUpperCase().replace(/[^A-Z]/g, '');
+  var addr = phloAddressKey(address) || String(address || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return first && addr ? first + '|' + addr : '';
 }

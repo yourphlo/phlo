@@ -58,7 +58,52 @@
         <p id="driver-login-error" class="form-errors" hidden></p>
         <button type="submit" class="btn primary">Driver sign-in</button>
       </form>
+      <form id="rx-login" class="driver-login" hidden novalidate>
+        <h3>Pharmacies</h3>
+        <p class="muted small">Approve patients' requests and message drivers. Sign in with your store code (e.g. VALLEY) and the PIN PHLO gave you.</p>
+        <label class="field">Store code
+          <input name="store" autocomplete="username" autocapitalize="characters" spellcheck="false" required>
+        </label>
+        <label class="field">PIN
+          <input name="pin" type="password" autocomplete="current-password" inputmode="numeric" maxlength="8" required>
+        </label>
+        <p id="rx-login-error" class="form-errors" hidden></p>
+        <button type="submit" class="btn primary">Pharmacy sign-in</button>
+      </form>
     </section>
+
+    <div id="view-patient" class="view" hidden>
+      <section class="card pt-card" aria-live="polite">
+        <label class="field pt-lang"><span id="pt-lang-label">Language</span>
+          <select id="pt-lang"></select>
+        </label>
+        <h2 id="pt-title">Your pharmacy delivery</h2>
+        <p id="pt-when" class="pt-when"></p>
+        <p id="pt-status" class="pt-status" hidden></p>
+        <div id="pt-body"></div>
+      </section>
+    </div>
+
+    <div id="view-rx" class="view" hidden>
+      <section class="card controls">
+        <div class="dp-what">
+          <b id="rx-title"></b>
+          <span id="rx-sub" class="muted small"></span>
+        </div>
+        <label class="field">Delivery date
+          <input id="rx-date" type="date">
+        </label>
+        <div class="actions">
+          <button type="button" id="rx-refresh" class="btn ghost">Refresh</button>
+        </div>
+      </section>
+      <section class="card">
+        <h2>Your deliveries <span id="rx-count" class="pill"></span></h2>
+        <p class="muted small">Patients get a text when their driver is about 30 minutes away and can answer it. When a patient asks to have it
+          left at the door or in the mailbox, approve or decline here. <b>Return to pharmacy</b> sends the driver a message.</p>
+        <ul id="rx-stops" class="live-list rx-list"></ul>
+      </section>
+    </div>
 
     <div id="view-driver" class="view" hidden>
       <section class="card dv-head">
@@ -71,6 +116,10 @@
           <a id="dv-next" class="btn primary" target="_blank" rel="noopener" hidden>Navigate to next stop</a>
           <button type="button" id="dv-refresh" class="btn ghost">Refresh</button>
         </div>
+      </section>
+      <section id="dv-msgs" class="card dv-msgs" hidden aria-live="polite">
+        <h2>Messages</h2>
+        <ul id="dv-msg-list" class="dv-msg-list"></ul>
       </section>
       <ol id="dv-stops" class="dv-stops"></ol>
     </div>
@@ -195,6 +244,25 @@
         <p id="dp-live-note" class="muted small"></p>
         <div id="dp-live"></div>
       </section>
+
+      <details id="dp-text-card" class="card dp-text-card" hidden>
+        <summary><h2>Texting settings</h2></summary>
+        <form id="ts-form" class="ts-form" novalidate>
+          <p id="ts-status" class="small"></p>
+          <label class="field">Text patients when the driver is this many minutes away
+            <input id="ts-lead" type="number" min="5" max="120" step="5" value="30">
+          </label>
+          <div class="field">
+            <span>Address for patients' replies (paste in Twilio: your number &gt; Messaging &gt; "A message comes in", HTTP POST)</span>
+            <div class="dp-fix"><input id="ts-hook" readonly aria-label="Address for patients' replies"><button type="button" id="ts-copy" class="btn">Copy</button></div>
+          </div>
+          <h3>Pharmacies</h3>
+          <p class="muted small">Each pharmacy signs in on this page with its store code and PIN to approve "leave it at the door" requests and
+            message drivers. When a patient asks, PHLO texts and/or emails the pharmacy here. Leave a row empty to skip it.</p>
+          <div class="table-wrap"><table><thead><tr><th>STORE</th><th>MOBILE</th><th>EMAIL</th><th>SIGN-IN PIN</th></tr></thead><tbody id="ts-rx"></tbody></table></div>
+          <div class="actions"><button type="submit" id="ts-save" class="btn primary">Save texting settings</button></div>
+        </form>
+      </details>
     </div>
 
     <div id="view-drivers" class="view" hidden>
@@ -308,6 +376,7 @@
       </div>
       <p id="dv-stop-address" class="dv-address"></p>
       <div id="dv-stop-meta" class="chips"></div>
+      <div id="dv-patient" class="dv-patient" hidden></div>
       <a id="dv-nav" class="btn primary wide-btn" target="_blank" rel="noopener">Navigate</a>
       <fieldset class="seg" id="dv-status">
         <legend>Outcome</legend>
@@ -373,6 +442,56 @@
     </form>
   </dialog>
 
+  <dialog id="ask-approve" class="sheet" aria-labelledby="ask-approve-title">
+    <form method="dialog" novalidate>
+      <div class="sheet-head"><h2 id="ask-approve-title">Leave it without a signature?</h2><button type="button" class="del" data-close aria-label="Close">&times;</button></div>
+      <p id="ask-approve-who" class="dv-address"></p>
+      <p><span id="ask-approve-req" class="chip warn"></span></p>
+      <p id="ask-approve-note" class="muted small"></p>
+      <label class="field">Approved by (name)
+        <input name="by" autocomplete="name">
+      </label>
+      <label class="field">Position
+        <input name="position" list="rx-positions" autocomplete="off" placeholder="Pharmacist">
+      </label>
+      <datalist id="rx-positions"><option value="Pharmacist"><option value="Pharmacist in charge"><option value="Pharmacy manager"><option value="Pharmacy technician"></datalist>
+      <ul class="form-errors" hidden></ul>
+      <div class="actions">
+        <button type="button" class="btn primary" data-ok="1">Approve</button>
+        <button type="button" class="btn" data-ok="0">Decline</button>
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="ask-message" class="sheet" aria-labelledby="ask-message-title">
+    <form method="dialog" novalidate>
+      <div class="sheet-head"><h2 id="ask-message-title">Message the driver</h2><button type="button" class="del" data-close aria-label="Close">&times;</button></div>
+      <p id="ask-message-who" class="dv-address"></p>
+      <fieldset class="checks-col">
+        <legend>Please RTS to RX (return to pharmacy)</legend>
+        <label><input type="radio" name="reason" value="pickup"> PT will pick up @ RX instead</label>
+        <label><input type="radio" name="reason" value="repack"> RX needs to repack/fill more meds</label>
+        <label><input type="radio" name="reason" value="other"> Other</label>
+        <input name="other" placeholder="Reason" autocomplete="off" hidden>
+      </fieldset>
+      <label class="field" id="ask-message-name">Your name (optional)
+        <input name="by" autocomplete="name">
+      </label>
+      <p class="muted small">The driver sees it in the driver app, and gets a text if their profile has a mobile number.</p>
+      <ul class="form-errors" hidden></ul>
+      <div class="actions">
+        <button type="button" class="btn primary" data-send>Send to driver</button>
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="texts-dialog" class="sheet" aria-labelledby="texts-title">
+    <form method="dialog"><div class="sheet-head"><h2 id="texts-title"></h2><button class="del" aria-label="Close">&times;</button></div>
+      <ol id="texts-log" class="texts-log"></ol></form>
+  </dialog>
+
   <dialog id="img-dialog" class="sheet img-sheet">
     <form method="dialog"><div class="sheet-head"><h2 id="img-title"></h2><button class="del" aria-label="Close">&times;</button></div>
       <img id="img-full" alt=""></form>
@@ -389,10 +508,14 @@
   <script src="core.js"></script>
   <script src="drivers.js"></script>
   <script src="dispatch.js"></script>
+  <script src="texts.js"></script>
   <script src="backend.js"></script>
   <script src="maps.js"></script>
   <script src="app.js"></script>
   <script src="dispatch-ui.js"></script>
+  <script src="asks.js"></script>
+  <script src="patient.js"></script>
   <script src="driver.js"></script>
+  <script src="pharmacy.js"></script>
 </body>
 </html>

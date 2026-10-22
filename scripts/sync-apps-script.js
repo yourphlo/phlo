@@ -1,10 +1,10 @@
-// Copies the shared files from web/ into apps-script/ (Apps Script shares globals across .gs files).
+// Copies the shared files from web/ into apps-script/ and apps-script-dispatch/ (Apps Script shares globals across .gs files).
 //   node scripts/sync-apps-script.js          -> copy
 //   node scripts/sync-apps-script.js --check  -> fail if out of date (used by tests/CI)
 const fs = require('fs');
 const path = require('path');
 const root = path.join(__dirname, '..');
-const pairs = [['web/core.js', 'apps-script/Core.gs'], ['web/stores.js', 'apps-script/Stores.gs']];
+const pairs = [['web/core.js', 'apps-script/Core.gs'], ['web/stores.js', 'apps-script/Stores.gs'], ['web/texts.js', 'apps-script-dispatch/Texts.gs']];
 let stale = 0;
 for (const [from, to] of pairs) {
   const src = fs.readFileSync(path.join(root, from), 'utf8');
