@@ -1,8 +1,8 @@
 // Runs apps-script-dispatch/Server.gs in Node with small in-memory stand-ins for the Apps Script services.
 //   const server = require('./fake-apps-script')({ adminTokens: { tok: 'yourphlo@gmail.com' } });
 //   server.post({ action: 'driver.login', ... })  -> parsed JSON reply
-//   server.sms (texts sent through the fake Twilio), server.mail, server.setNow('2026-10-22T10:00:00')
-//   server.twilio({ From, Body, key })  -> a patient's text coming in
+//   server.sms (texts sent through the fake Quo), server.mail, server.setNow('2026-10-22T10:00:00')
+//   server.quo({ from, body, key, id })  -> a patient's text coming in (a Quo message.received event)
 // The clock and dates are UTC (the server's time zone is ignored), and "now" is opts.now or setNow().
 const fs = require('fs');
 const path = require('path');
@@ -70,11 +70,12 @@ module.exports = function makeServer(opts) {
       newBlob: (bytes, type, name) => ({ bytes, type, name })
     },
     UrlFetchApp: { fetch: (url, o) => {
-      if (/api\.twilio\.com/.test(url)) {
-        const stopped = (opts.optedOut || []).indexOf(o.payload.To) >= 0;
-        if (!stopped) sms.push({ to: o.payload.To, body: o.payload.Body, auth: o.headers.Authorization });
-        return { getResponseCode: () => (stopped ? 400 : 201),
-          getContentText: () => JSON.stringify(stopped ? { code: 21610, message: 'Attempt to send to unsubscribed recipient' } : { sid: 'SM' + sms.length }) };
+      if (/api\.quo\.com\/v1\/messages/.test(url)) {
+        const req = JSON.parse(o.payload), to = req.to[0];
+        const stopped = (opts.optedOut || []).indexOf(to) >= 0;
+        if (!stopped) sms.push({ to, body: req.content, from: req.from, auth: o.headers.Authorization });
+        return { getResponseCode: () => (stopped ? 400 : 202),
+          getContentText: () => JSON.stringify(stopped ? { message: 'Recipient has opted out of messages from this number', code: '0200400', status: 400 } : { data: { id: 'AC' + sms.length } }) };
       }
       const tok = (o.headers.Authorization || '').replace('Bearer ', '');
       const email = (opts.adminTokens || {})[tok];
@@ -89,10 +90,13 @@ module.exports = function makeServer(opts) {
   };
   vm.createContext(ctx);
   for (const f of ['Texts.gs', 'Server.gs']) vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'apps-script-dispatch', f), 'utf8'), ctx, { filename: f });
-  if (opts.twilio) Object.assign(props, { TWILIO_SID: 'ACfake', TWILIO_TOKEN: 'secret', TWILIO_FROM: '+16265550000' });
+  if (opts.quo) Object.assign(props, { QUO_API_KEY: 'quokey', QUO_FROM: '+16265550000' });
+  let inId = 0;
   return {
     post: body => JSON.parse(ctx.doPost({ parameter: {}, postData: { contents: typeof body === 'string' ? body : JSON.stringify(body) } }).text),
-    twilio: p => ctx.doPost({ parameter: Object.assign({ MessageSid: 'SMin' }, p), postData: { contents: '' } }).text,
+    quo: p => JSON.parse(ctx.doPost({ parameter: { key: p.key }, postData: { contents: JSON.stringify({ id: 'EV' + (++inId), object: 'event', apiVersion: 'v3',
+      type: p.type || 'message.received', data: { object: { id: p.id || 'ACin' + inId, object: 'message', from: p.from, to: '+16265550000',
+        direction: 'incoming', body: p.body, status: 'received' } } }) } }).text),
     run: name => ctx[name](),
     setNow: iso => { now = Date.parse(iso + 'Z'); },
     clearTickCache: () => { delete cache.tick; },

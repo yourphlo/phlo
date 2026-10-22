@@ -11,7 +11,7 @@ try { ({ chromium } = require('playwright')); } catch (e) {
 const root = path.join(__dirname, '..');
 const shots = process.argv[2];
 const DISPATCH = 'https://script.google.com/macros/s/fake/exec';
-const server = require('./fake-apps-script')({ adminTokens: { fake: 'yourphlo@gmail.com' }, today: '2026-10-22', twilio: true });
+const server = require('./fake-apps-script')({ adminTokens: { fake: 'yourphlo@gmail.com' }, today: '2026-10-22', quo: true });
 
 const web = http.createServer((req, res) => {
   const f = path.join(root, 'web', decodeURIComponent(req.url.split('?')[0]).replace(/^\/$/, '/index.html'));

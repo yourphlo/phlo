@@ -348,7 +348,7 @@ ctx.PHLO_LANGS.forEach(l => {
 
 /* ---------- texting on the dispatch server ---------- */
 {
-  const srv = require('./fake-apps-script')({ adminTokens: { good: 'yourphlo@gmail.com' }, twilio: true, now: '2026-10-22T08:00:00', optedOut: ['+16265550199'] });
+  const srv = require('./fake-apps-script')({ adminTokens: { good: 'yourphlo@gmail.com' }, quo: true, now: '2026-10-22T08:00:00', optedOut: ['+16265550199'] });
   const sha = (salt, pin) => require('crypto').createHash('sha256').update(salt + ':' + pin).digest('hex');
   srv.post({ action: 'admin.syncDrivers', googleToken: 'good', drivers: [
     { id: 'a', name: 'Ana Ruiz', username: 'ana', salt: 's1', hash: sha('s1', '4321'), mobile: '626-555-0001' },
@@ -378,16 +378,21 @@ ctx.PHLO_LANGS.forEach(l => {
   eq(/^Entrega de farmacia PHLO: su chofer llegará en unos 20 minutos \(alrededor de las 9:15 AM\)/.test(srv.sms[0].body), true, 'texting: in Spanish, with minutes and time');
   const token = srv.sms[0].body.match(/#t=(\w+)/)[1];
   eq(srv.sms[0].body.indexOf('https://yourphlo.github.io/phlo/#t=261022') >= 0, true, 'texting: reply link');
-  eq(srv.sms[0].auth, 'Basic ' + Buffer.from('ACfake:secret').toString('base64'), 'texting: Twilio sign-in');
+  eq([srv.sms[0].auth, srv.sms[0].from], ['quokey', '+16265550000'], 'texting: Quo API key and number');
   srv.post({ action: 'driver.start', session: ana, date: '2026-10-22' });
   eq(srv.sms.length, 1, 'texting: each patient is texted once');
 
   // Patient 1 answers "4" (front door) by text: the pharmacy is asked, the driver told.
   srv.sms.length = 0;
-  eq(srv.twilio({ From: '+16265550101', Body: '4', key: 'wrong' }), '<Response></Response>', 'texting: wrong hook key ignored');
+  eq(srv.quo({ from: '+16265550101', body: '4', key: 'wrong' }), { ok: true }, 'texting: wrong hook key ignored');
   eq(srv.sms.length, 0, 'texting: nothing done for a wrong key');
-  srv.twilio({ From: '+16265550101', Body: '4', key: hookKey });
+  srv.quo({ from: '+16265550101', body: '4', key: hookKey, id: 'ACdoor' });
   eq(srv.sms.map(m => m.to), ['+16265550101', '+16265550300', '+16265550001'], 'texting: door request answers patient, asks pharmacy, tells driver');
+  srv.quo({ from: '+16265550101', body: '4', key: hookKey, id: 'ACdoor' });
+  eq(srv.sms.length, 3, 'texting: a resent Quo event is handled once');
+  delete srv.cache.quoIn_ACdoor;
+  srv.quo({ from: '+16265550101', body: '4', key: hookKey, id: 'ACdoor' });
+  eq(srv.sms.length, 3, 'texting: a resent Quo event is handled once (after the cache expires)');
   eq(srv.sms[0].body.indexOf('Gracias. Su farmacia debe aprobar'), 0, 'texting: answer in Spanish');
   eq(srv.sms[1].body.indexOf('RX 1000001') > 0 && srv.sms[1].body.indexOf('DOE') < 0, true, 'texting: pharmacy text has the RX number, not the name');
   eq([srv.mail.length, srv.mail[0].to], [1, 'rx@example.com'], 'texting: pharmacy emailed');
@@ -419,9 +424,9 @@ ctx.PHLO_LANGS.forEach(l => {
   srv.post({ action: 'driver.update', session: ana, date: '2026-10-22', stopId: 'rx1000001', update: { status: 'delivered', methods: ['door'] } });
   eq(srv.sms.map(m => m.to + ' ' + m.body.slice(0, 64)), ['+16265550102 PHLO pharmacy delivery: your driver is about 20 minutes away (ar'], 'texting: next stop texted after a late stop');
   srv.sms.length = 0;
-  srv.twilio({ From: '(626) 555-0102', Body: '1', key: hookKey });
+  srv.quo({ from: '(626) 555-0102', body: '1', key: hookKey });
   eq(srv.sms[0].body.indexOf('Thank you. What day and time work for you?'), 0, 'texting: "1" alone asks for the day');
-  srv.twilio({ From: '+16265550102', Body: 'Saturday morning', key: hookKey });
+  srv.quo({ from: '+16265550102', body: 'Saturday morning', key: hookKey });
   let st = srv.post({ action: 'admin.status', googleToken: 'good', date: '2026-10-22' });
   eq([st.texts.stops.rx1000002.request.choice, st.texts.stops.rx1000002.request.detail], ['redeliver', 'Saturday morning'], 'texting: the day comes in the next text');
   eq(srv.sms.slice(1).map(m => m.to + ' ' + m.body), ['+16265550102 Thank you. We told your pharmacy to redeliver: Saturday morning.',
@@ -456,19 +461,20 @@ ctx.PHLO_LANGS.forEach(l => {
 
   // Opted-out numbers, a finished stop, and a stranger.
   const sent = srv.post({ action: 'admin.textNow', googleToken: 'good', date: '2026-10-22', stopId: 'rx1000004' }).sent;
-  eq([sent.ok, sent.code], [false, 21610], 'texting: STOP-ed number not texted');
+  eq([sent.ok, sent.optOut], [false, true], 'texting: STOP-ed number not texted');
+  eq(srv.post({ action: 'admin.status', googleToken: 'good', date: '2026-10-22' }).texts.stops.rx1000004.optOut, true, 'texting: STOP-ed number remembered');
   srv.sms.length = 0;
-  srv.twilio({ From: '+16265550101', Body: '2', key: hookKey });
+  srv.quo({ from: '+16265550101', body: '2', key: hookKey });
   eq(srv.sms.map(m => m.body), ['Esta entrega ya terminó. Llame a su farmacia si tiene preguntas.'], 'texting: finished stop answered');
   srv.sms.length = 0;
-  srv.twilio({ From: '+13105550000', Body: '1', key: hookKey });
+  srv.quo({ from: '+13105550000', body: '1', key: hookKey });
   eq(srv.sms.length, 0, 'texting: unknown numbers get no answer');
 
   // Texting not set up: nothing goes out, and the office sees why.
   const off = require('./fake-apps-script')({ adminTokens: { good: 'yourphlo@gmail.com' }, now: '2026-10-22T08:00:00' });
   off.post({ action: 'admin.publish', googleToken: 'good', date: '2026-10-22', routes: [{ driverId: 'a', driverName: 'A', start: '09:00', stops: [stop('rx1', 1, '08:20', '6265550101', 'en')] }] });
-  eq(off.post({ action: 'admin.textNow', googleToken: 'good', date: '2026-10-22', stopId: 'rx1' }).sent.err, 'Texting is not set up yet (Twilio).', 'texting: not set up');
-  eq(off.sms.length, 0, 'texting: nothing sent without Twilio');
+  eq(off.post({ action: 'admin.textNow', googleToken: 'good', date: '2026-10-22', stopId: 'rx1' }).sent.err, 'Texting is not set up yet (Quo).', 'texting: not set up');
+  eq(off.sms.length, 0, 'texting: nothing sent without Quo');
 }
 
 try { execFileSync('node', [path.join(root, 'scripts/sync-apps-script.js'), '--check'], { stdio: 'inherit' }); }

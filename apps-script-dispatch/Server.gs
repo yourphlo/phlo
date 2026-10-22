@@ -11,7 +11,7 @@
  *   - let the office or a pharmacy message a driver.
  *
  * Everything is kept in the "PHLO Dispatch" folder of the Google Drive that runs this script.
- * Texts go out through Twilio (Script properties TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM). Without them
+ * Texts go out through Quo, formerly OpenPhone (Script properties QUO_API_KEY, QUO_FROM). Without them
  * nothing is texted; the office sees "not sent" on each stop. The words and rules are in Texts.gs.
  * Setup: see README.md in this folder.
  */
@@ -30,9 +30,9 @@ function doGet() {
 }
 
 function doPost(e) {
-  if (e && e.parameter && e.parameter.MessageSid) return twilioIn_(e);
   var req;
   try { req = JSON.parse(e.postData.contents); } catch (err) { return out_({ ok: false, error: 'Bad request.' }); }
+  if (req && req.object === 'event' && req.type) return quoIn_(e, req);
   try {
     var fn = ACTIONS[req.action];
     if (!fn) throw new Error('Unknown action.');
@@ -111,7 +111,7 @@ var ACTIONS = {
       writeJson_('texts-' + date + '.json', texts);
       writeJson_('patients.json', people);
     });
-    return { date: date, routes: routes.length, texting: twilioReady_() };
+    return { date: date, routes: routes.length, texting: quoReady_() };
   },
 
   /** Saved phone numbers and languages: {keys: [...]} -> {patients: {key: {phone, lang}}}. */
@@ -150,8 +150,8 @@ var ACTIONS = {
     });
     var st = settings_(), acc = JSON.parse(props_().getProperty('rxAccounts') || '{}'), shown = {};
     Object.keys(st.pharmacies).forEach(function (c) { shown[c] = { phone: st.pharmacies[c].phone, email: st.pharmacies[c].email, hasPin: !!acc[c.toLowerCase()] }; });
-    var from = String(props_().getProperty('TWILIO_FROM') || '');
-    return { ready: twilioReady_(), from: /^MG/.test(from) ? 'Messaging Service' : phloPhoneShow(from), leadMin: st.leadMin, pharmacies: shown, hookUrl: hookUrl_() };
+    var from = String(props_().getProperty('QUO_FROM') || '');
+    return { ready: quoReady_(), from: /^PN/.test(from) ? 'your Quo number' : phloPhoneShow(from), leadMin: st.leadMin, pharmacies: shown, hookUrl: hookUrl_() };
   },
 
   /** The office approves or declines a patient's "leave it without a signature" request for the pharmacy. */
@@ -190,7 +190,7 @@ var ACTIONS = {
     var date = isoDate_(req.date);
     tick_(false);
     var plan = readJson_('routes-' + date + '.json');
-    return { date: date, plan: plan, updates: readJson_('updates-' + date + '.json') || {}, texts: readTexts_(date), texting: twilioReady_() };
+    return { date: date, plan: plan, updates: readJson_('updates-' + date + '.json') || {}, texts: readTexts_(date), texting: quoReady_() };
   },
 
   'admin.file': function (req) {
@@ -580,12 +580,12 @@ function newToken_(date) {
   return date.slice(2).replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '').slice(0, 14);
 }
 
-function twilioReady_() {
+function quoReady_() {
   var p = props_();
-  return !!(p.getProperty('TWILIO_SID') && p.getProperty('TWILIO_TOKEN') && p.getProperty('TWILIO_FROM'));
+  return !!(p.getProperty('QUO_API_KEY') && p.getProperty('QUO_FROM'));
 }
 
-/** The web address Twilio sends patients' replies to (paste it in Twilio: phone number > Messaging > "A message comes in"). */
+/** The web address Quo sends patients' replies to (paste it in Quo: Settings > Webhooks, event message.received). */
 function hookUrl_() {
   var key = props_().getProperty('HOOK_KEY');
   if (!key) { key = Utilities.getUuid().replace(/-/g, ''); props_().setProperty('HOOK_KEY', key); }
@@ -594,31 +594,33 @@ function hookUrl_() {
   return url ? url + '?key=' + key : '';
 }
 
-/** Sends one text. Returns {ok, sid} or {ok: false, err, code}. */
+/** Sends one text through Quo. Returns {ok, sid} or {ok: false, err, code, optOut}. */
 function sendSms_(to, body) {
   if (!to) return { ok: false, err: 'No mobile number.' };
-  if (!twilioReady_()) return { ok: false, err: 'Texting is not set up yet (Twilio).' };
-  var p = props_(), sid = p.getProperty('TWILIO_SID'), from = p.getProperty('TWILIO_FROM');
-  var payload = { To: to, Body: body };
-  if (/^MG/.test(from)) payload.MessagingServiceSid = from; else payload.From = from;
+  if (!quoReady_()) return { ok: false, err: 'Texting is not set up yet (Quo).' };
+  var p = props_();
   try {
-    var res = UrlFetchApp.fetch('https://api.twilio.com/2010-04-01/Accounts/' + sid + '/Messages.json', {
-      method: 'post', payload: payload, muteHttpExceptions: true,
-      headers: { Authorization: 'Basic ' + Utilities.base64Encode(sid + ':' + p.getProperty('TWILIO_TOKEN')) }
+    var res = UrlFetchApp.fetch('https://api.quo.com/v1/messages', {
+      method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      payload: JSON.stringify({ content: String(body).slice(0, 1600), from: p.getProperty('QUO_FROM'), to: [to] }),
+      headers: { Authorization: p.getProperty('QUO_API_KEY') }
     });
     var j = {};
     try { j = JSON.parse(res.getContentText() || '{}'); } catch (e) { /* not JSON */ }
-    if (res.getResponseCode() >= 300) return { ok: false, err: j.message || 'Twilio answered ' + res.getResponseCode() + '.', code: j.code || 0 };
-    return { ok: true, sid: j.sid || '' };
+    if (res.getResponseCode() >= 300) {
+      var msg = j.message || (j.error && j.error.message) || j.title || 'Quo answered ' + res.getResponseCode() + '.';
+      return { ok: false, err: msg, code: j.code || res.getResponseCode(), optOut: /opt(ed)?[\s-]?out|unsubscribed|\bSTOP\b/i.test(msg) };
+    }
+    return { ok: true, sid: (j.data && j.data.id) || '' };
   } catch (e) {
-    return { ok: false, err: 'Could not reach Twilio: ' + e.message };
+    return { ok: false, err: 'Could not reach Quo: ' + e.message };
   }
 }
 
 /** Texts a patient (t = their entry in the texts file) and logs it there. */
 function textPatient_(t, kind, body) {
   var r = sendSms_(t.phone, body);
-  if (!r.ok && r.code === 21610) t.optOut = true; // they replied STOP earlier
+  if (!r.ok && r.optOut) t.optOut = true; // they replied STOP earlier
   t.log = (t.log || []).concat([{ dir: 'out', kind: kind, text: body, at: new Date().toISOString(), ok: r.ok, err: r.err || '' }]).slice(-30);
   return r;
 }
@@ -803,13 +805,22 @@ function rxOwns_(s, date, stopId) {
   if (!f || String(f.stop.store).toUpperCase() !== s.code) throw new Error('That stop is not one of your deliveries.');
 }
 
-/** A text from a patient (Twilio posts it here). Answers with an empty reply: anything we say goes out by sendSms_. */
-function twilioIn_(e) {
-  var p = e.parameter, xml = ContentService.createTextOutput('<Response></Response>').setMimeType(ContentService.MimeType.XML);
+/**
+ * A text from a patient (Quo posts a message.received event here). Each message is handled once: Quo
+ * resends an event it thinks failed, so the message id is remembered. Anything we say goes out by sendSms_.
+ */
+function quoIn_(e, ev) {
+  var p = (e && e.parameter) || {}, done = out_({ ok: true });
   var key = props_().getProperty('HOOK_KEY');
-  if (!key || p.key !== key) return xml;
-  var from = phloE164(p.From), body = String(p.Body || '').slice(0, 1000);
-  if (!from) return xml;
+  if (!key || p.key !== key) return done;
+  if (ev.type !== 'message.received') return done;
+  var m = (ev.data && ev.data.object) || {};
+  if (m.direction && m.direction !== 'incoming') return done;
+  var msgId = String(m.id || ev.id || ''), cache = CacheService.getScriptCache();
+  if (msgId && cache.get('quoIn_' + msgId)) return done;
+  var from = phloE164(m.from), body = String(m.body || m.text || '').slice(0, 1000);
+  if (!from) return done;
+  if (msgId) cache.put('quoIn_' + msgId, '1', 21600);
   // The patient's stop: the newest day (today or before, up to 3 days back) whose texts went to this number.
   var dates = JSON.parse(props_().getProperty('dates') || '[]'), today = today_();
   var days = dates.filter(function (d) { return d <= today; }).reverse().slice(0, 3);
@@ -821,7 +832,8 @@ function twilioIn_(e) {
     var date = days[i], id = ids[0];
     withLock_(function () {
       var fresh = readTexts_(date), t = fresh.stops[id];
-      t.log = (t.log || []).concat([{ dir: 'in', text: body, at: new Date().toISOString() }]).slice(-30);
+      if (msgId && (t.log || []).some(function (l) { return l.id === msgId; })) return;
+      t.log = (t.log || []).concat([{ dir: 'in', text: body, at: new Date().toISOString(), id: msgId || undefined }]).slice(-30);
       var parsed = phloParseReply(body);
       if (/^\s*(STOP|STOPALL|UNSUBSCRIBE|CANCEL|END|QUIT|START|UNSTOP|HELP|INFO)\s*$/i.test(body)) {
         t.optOut = /^\s*(STOP|STOPALL|UNSUBSCRIBE|CANCEL|END|QUIT)\s*$/i.test(body);
@@ -832,7 +844,7 @@ function twilioIn_(e) {
       }
       writeJson_('texts-' + date + '.json', fresh);
     });
-    return xml;
+    return done;
   }
-  return xml;
+  return done;
 }

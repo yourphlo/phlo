@@ -153,7 +153,7 @@ and text), the office (Deliveries list) and the pharmacy (pharmacy page).
 - Texts never include the medication. The pharmacy's text has the RX number, not the name. Drivers don't
   see patients' phone numbers. Patients who reply STOP get no more texts.
 
-Texting needs a Twilio account: see "Patient texts" in `apps-script-dispatch/README.md`. Until then nothing
+Texting needs a Quo account (formerly OpenPhone): see "Patient texts" in `apps-script-dispatch/README.md`. Until then nothing
 is texted and each stop says "Text not sent".
 
 ### Pharmacy page
