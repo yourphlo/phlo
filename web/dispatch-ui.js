@@ -972,7 +972,7 @@
 
   function renderTextSettings(r) {
     $('ts-status').textContent = r.ready ? 'Texting is on. Texts come from ' + r.from + '.' :
-      'Texting is not set up yet: patients get no texts. Follow "Patient texts" in apps-script-dispatch/README.md (Twilio).';
+      'Texting is not set up yet: patients get no texts. Follow "Patient texts" in apps-script-dispatch/README.md (Quo).';
     $('ts-status').className = 'small ' + (r.ready ? 'good' : 'bad');
     $('ts-lead').value = r.leadMin;
     $('ts-hook').value = r.hookUrl || '';

@@ -316,15 +316,18 @@ eq(JSON.parse(JSON.stringify(ctx.phloStorePhones([['10/19/2026', '1000001', 'DOE
 eq([ctx.phloE164('(626) 555-0100'), ctx.phloE164('1-626-555-0100'), ctx.phloE164('+44 20 7946 0958'), ctx.phloE164('555-0100'), ctx.phloE164('')],
   ['+16265550100', '+16265550100', '+442079460958', '', ''], 'phone numbers');
 eq(ctx.phloPhoneShow('+16265550100'), '(626) 555-0100', 'phone shown');
-const pr = t => { const r = ctx.phloParseReply(t); return [r.choice, r.detail]; };
-eq([pr('1 Friday after 3pm'), pr(' 3. Maria, daughter'), pr('２'), pr('四'), pr('5'), pr('10 am tomorrow'), pr('who is this?')],
-  [['redeliver', 'Friday after 3pm'], ['someone', 'Maria, daughter'], ['refuse', ''], ['door', ''], ['mailbox', ''], [null, '10 am tomorrow'], [null, 'who is this?']], 'read replies');
 eq([ctx.phloReplyNeedsDetail('redeliver', ''), ctx.phloReplyNeedsDetail('someone', 'Ana'), ctx.phloReplyNeedsDetail('refuse', '')], [true, false, false], 'replies that need more');
 eq(ctx.phloRedeliverText('2026-10-24', 'afternoon'), 'Sat 10/24, afternoon (12-5 PM)', 'redeliver words');
 eq(ctx.phloRtsText('1000001', 'DOE,JANE', 'pickup'), 'Please RTS to RX [1000001, DOE,JANE]: PT will pick up @ RX instead', 'RTS words');
 eq(ctx.phloRtsText('1000001', 'DOE,JANE', 'other', 'wrong address'), 'Please RTS to RX [1000001, DOE,JANE]: wrong address', 'RTS other');
-eq(ctx.phloSms('es', 'got_redeliver', { detail: 'viernes' }), 'Gracias. Le avisamos a su farmacia que entregue otro día: viernes.', 'Spanish text');
-eq(ctx.phloSms('xx', 'closed').indexOf('This delivery'), 0, 'unknown language falls back to English');
+eq(ctx.phloSms('es', 'update', { link: 'L' }), 'PHLO: hay novedades sobre su entrega. Toque L', 'Spanish text');
+eq(ctx.phloSms('xx', 'closed'), 'PHLO: this delivery is finished.', 'unknown language falls back to English');
+// HIPAA: no text says pharmacy or medication, in any language.
+{
+  const words = /pharm|medic|farmac|药|藥|thuốc|약|botika|gamot/i;
+  const all = [].concat(...Object.values(ctx.PHLO_SMS).map(Object.values), ctx.phloDriverSms(3, 'msg'), ctx.phloDriverSms(3, 'update'));
+  eq(all.filter(t => words.test(t)), [], 'texts never mention pharmacy or medication');
+}
 // Every language has every message and page word, and the same {slots}.
 const slots = t => (String(t).match(/\{\w+\}/g) || []).sort().join();
 ctx.PHLO_LANGS.forEach(l => {
@@ -348,7 +351,7 @@ ctx.PHLO_LANGS.forEach(l => {
 
 /* ---------- texting on the dispatch server ---------- */
 {
-  const srv = require('./fake-apps-script')({ adminTokens: { good: 'yourphlo@gmail.com' }, twilio: true, now: '2026-10-22T08:00:00', optedOut: ['+16265550199'] });
+  const srv = require('./fake-apps-script')({ adminTokens: { good: 'yourphlo@gmail.com' }, quo: true, now: '2026-10-22T08:00:00', optedOut: ['+16265550199'] });
   const sha = (salt, pin) => require('crypto').createHash('sha256').update(salt + ':' + pin).digest('hex');
   srv.post({ action: 'admin.syncDrivers', googleToken: 'good', drivers: [
     { id: 'a', name: 'Ana Ruiz', username: 'ana', salt: 's1', hash: sha('s1', '4321'), mobile: '626-555-0001' },
@@ -375,23 +378,37 @@ ctx.PHLO_LANGS.forEach(l => {
   eq(srv.sms.length, 0, 'texting: nothing before the driver starts');
   srv.post({ action: 'driver.start', session: ana, date: '2026-10-22' });
   eq(srv.sms.map(m => m.to), ['+16265550101'], 'texting: starting texts the first stop');
-  eq(/^Entrega de farmacia PHLO: su chofer llegará en unos 20 minutos \(alrededor de las 9:15 AM\)/.test(srv.sms[0].body), true, 'texting: in Spanish, with minutes and time');
+  eq(/^Entrega PHLO: su chofer llegará en unos 20 minutos \(alrededor de las 9:15 AM\)/.test(srv.sms[0].body), true, 'texting: in Spanish, with minutes and time');
   const token = srv.sms[0].body.match(/#t=(\w+)/)[1];
   eq(srv.sms[0].body.indexOf('https://yourphlo.github.io/phlo/#t=261022') >= 0, true, 'texting: reply link');
-  eq(srv.sms[0].auth, 'Basic ' + Buffer.from('ACfake:secret').toString('base64'), 'texting: Twilio sign-in');
+  eq([srv.sms[0].auth, srv.sms[0].from], ['quokey', '+16265550000'], 'texting: Quo API key and number');
   srv.post({ action: 'driver.start', session: ana, date: '2026-10-22' });
   eq(srv.sms.length, 1, 'texting: each patient is texted once');
 
-  // Patient 1 answers "4" (front door) by text: the pharmacy is asked, the driver told.
+  // HIPAA: the patient's text has no pharmacy, medication, name or RX number, and no reply numbers.
+  eq(/pharm|medic|farmac|DOE|1000001|\n1 /i.test(srv.sms[0].body), false, 'texting: patient text has no details');
+
+  // Patient 1 texts back: they only get the link again (answers go on the page). Quo resends are handled once.
   srv.sms.length = 0;
-  eq(srv.twilio({ From: '+16265550101', Body: '4', key: 'wrong' }), '<Response></Response>', 'texting: wrong hook key ignored');
+  eq(srv.quo({ from: '+16265550101', body: '4', key: 'wrong' }), { ok: true }, 'texting: wrong hook key ignored');
   eq(srv.sms.length, 0, 'texting: nothing done for a wrong key');
-  srv.twilio({ From: '+16265550101', Body: '4', key: hookKey });
-  eq(srv.sms.map(m => m.to), ['+16265550101', '+16265550300', '+16265550001'], 'texting: door request answers patient, asks pharmacy, tells driver');
-  eq(srv.sms[0].body.indexOf('Gracias. Su farmacia debe aprobar'), 0, 'texting: answer in Spanish');
-  eq(srv.sms[1].body.indexOf('RX 1000001') > 0 && srv.sms[1].body.indexOf('DOE') < 0, true, 'texting: pharmacy text has the RX number, not the name');
-  eq([srv.mail.length, srv.mail[0].to], [1, 'rx@example.com'], 'texting: pharmacy emailed');
-  eq(srv.sms[2].body, 'PHLO stop 1 (1000001,DOE,JANE): patient says: Leave at front door, no signature (waiting for the pharmacy\'s OK)', 'texting: driver text');
+  srv.quo({ from: '+16265550101', body: '4 front door please', key: hookKey, id: 'ACdoor' });
+  eq(srv.sms.map(m => m.to + ' ' + m.body), ['+16265550101 PHLO: no podemos recibir respuestas por mensaje de texto. Por favor toque https://yourphlo.github.io/phlo/#t=' + token],
+    'texting: a text back gets the link, in Spanish');
+  srv.quo({ from: '+16265550101', body: '4 front door please', key: hookKey, id: 'ACdoor' });
+  eq(srv.sms.length, 1, 'texting: a resent Quo event is handled once');
+  delete srv.cache.quoIn_ACdoor;
+  srv.quo({ from: '+16265550101', body: '4 front door please', key: hookKey, id: 'ACdoor' });
+  eq(srv.sms.length, 1, 'texting: a resent Quo event is handled once (after the cache expires)');
+  eq(srv.post({ action: 'admin.status', googleToken: 'good', date: '2026-10-22' }).texts.stops.rx1000001.request, undefined, 'texting: a text is not taken as an answer');
+
+  // Patient 1 answers "front door" on the page: the pharmacy is asked, the driver told, with no details in the texts.
+  srv.sms.length = 0;
+  srv.post({ action: 'patient.reply', token, choice: 'door', data: {} });
+  eq(srv.sms.map(m => m.to), ['+16265550300', '+16265550001'], 'texting: door request asks pharmacy, tells driver');
+  eq(srv.sms[0].body, 'PHLO: a delivery needs your OK to leave it without a signature. Sign in to see it: https://yourphlo.github.io/phlo/ > Pharmacy sign-in.', 'texting: pharmacy text has no RX number or name');
+  eq([srv.mail.length, srv.mail[0].to, srv.mail[0].subject, /1000001|DOE/.test(srv.mail[0].body)], [1, 'rx@example.com', 'PHLO: approval needed', false], 'texting: pharmacy emailed, no details');
+  eq(srv.sms[1].body, 'PHLO: update on stop 1. Open the PHLO app.', 'texting: driver text has only the stop number');
   let dr = srv.post({ action: 'driver.route', session: ana });
   eq([dr.texts.rx1000001.request.choice, dr.texts.rx1000001.approval.status], ['door', 'pending'], 'texting: driver app shows the request');
 
@@ -407,26 +424,23 @@ ctx.PHLO_LANGS.forEach(l => {
     'That stop is not one of your deliveries.', 'texting: pharmacy cannot approve another store\'s stop');
   srv.sms.length = 0;
   srv.post({ action: 'rx.approve', session: rx, date: '2026-10-22', stopId: 'rx1000001', ok: true, by: 'Jane Kim', position: 'Pharmacist' });
-  eq(srv.sms.map(m => m.to), ['+16265550101', '+16265550001'], 'texting: approval texts patient and driver');
-  eq(srv.sms[0].body.indexOf('Su farmacia aprobó dejar su entrega en la puerta principal'), 0, 'texting: approval in Spanish');
-  eq(srv.sms[1].body.indexOf('approved by Jane Kim, Pharmacist') > 0, true, 'texting: driver told who approved');
+  eq(srv.sms.map(m => m.to + ' ' + m.body), ['+16265550101 PHLO: hay novedades sobre su entrega. Toque https://yourphlo.github.io/phlo/#t=' + token,
+    '+16265550001 PHLO: update on stop 1. Open the PHLO app.'], 'texting: approval tells patient and driver, with no details');
   dr = srv.post({ action: 'driver.route', session: ana });
   eq([dr.texts.rx1000001.approval.status, dr.texts.rx1000001.approval.by, dr.texts.rx1000001.approval.position], ['approved', 'Jane Kim', 'Pharmacist'], 'texting: driver app shows the approval');
 
-  // Driver finishes stop 1 late: stop 2 is texted. Patient 2 answers "1", then the day.
+  // Driver finishes stop 1 late: stop 2 is texted. Patient 2 asks for another day on the page.
   srv.setNow('2026-10-22T09:45:00');
   srv.sms.length = 0;
   srv.post({ action: 'driver.update', session: ana, date: '2026-10-22', stopId: 'rx1000001', update: { status: 'delivered', methods: ['door'] } });
-  eq(srv.sms.map(m => m.to + ' ' + m.body.slice(0, 64)), ['+16265550102 PHLO pharmacy delivery: your driver is about 20 minutes away (ar'], 'texting: next stop texted after a late stop');
+  eq(srv.sms.map(m => m.to + ' ' + m.body.slice(0, 64)), ['+16265550102 PHLO delivery: your driver is about 20 minutes away (around 10:0'], 'texting: next stop texted after a late stop');
+  const token2 = srv.sms[0].body.match(/#t=(\w+)/)[1];
   srv.sms.length = 0;
-  srv.twilio({ From: '(626) 555-0102', Body: '1', key: hookKey });
-  eq(srv.sms[0].body.indexOf('Thank you. What day and time work for you?'), 0, 'texting: "1" alone asks for the day');
-  srv.twilio({ From: '+16265550102', Body: 'Saturday morning', key: hookKey });
+  srv.post({ action: 'patient.reply', token: token2, choice: 'redeliver', data: { date: '2026-10-24', time: 'morning' } });
   let st = srv.post({ action: 'admin.status', googleToken: 'good', date: '2026-10-22' });
-  eq([st.texts.stops.rx1000002.request.choice, st.texts.stops.rx1000002.request.detail], ['redeliver', 'Saturday morning'], 'texting: the day comes in the next text');
-  eq(srv.sms.slice(1).map(m => m.to + ' ' + m.body), ['+16265550102 Thank you. We told your pharmacy to redeliver: Saturday morning.',
-    '+16265550001 PHLO stop 2 (1000002,DOE,JANE): patient says: Not home: redeliver Saturday morning'], 'texting: answer + driver told');
-  eq(st.texts.stops.rx1000002.log.map(l => l.dir), ['out', 'in', 'out', 'in', 'out'], 'texting: office sees the whole conversation');
+  eq([st.texts.stops.rx1000002.request.choice, st.texts.stops.rx1000002.request.detail], ['redeliver', 'Sat 10/24, morning (9 AM-12 PM)'], 'texting: redelivery day saved');
+  eq(srv.sms.map(m => m.to + ' ' + m.body), ['+16265550001 PHLO: update on stop 2. Open the PHLO app.'], 'texting: driver told, the day not in the text');
+  eq(st.texts.stops.rx1000002.log.map(l => l.dir), ['out'], 'texting: office sees the texts');
 
   // The office asks the driver to bring stop 3 back.
   srv.sms.length = 0;
@@ -456,19 +470,20 @@ ctx.PHLO_LANGS.forEach(l => {
 
   // Opted-out numbers, a finished stop, and a stranger.
   const sent = srv.post({ action: 'admin.textNow', googleToken: 'good', date: '2026-10-22', stopId: 'rx1000004' }).sent;
-  eq([sent.ok, sent.code], [false, 21610], 'texting: STOP-ed number not texted');
+  eq([sent.ok, sent.optOut], [false, true], 'texting: STOP-ed number not texted');
+  eq(srv.post({ action: 'admin.status', googleToken: 'good', date: '2026-10-22' }).texts.stops.rx1000004.optOut, true, 'texting: STOP-ed number remembered');
   srv.sms.length = 0;
-  srv.twilio({ From: '+16265550101', Body: '2', key: hookKey });
-  eq(srv.sms.map(m => m.body), ['Esta entrega ya terminó. Llame a su farmacia si tiene preguntas.'], 'texting: finished stop answered');
+  srv.quo({ from: '+16265550101', body: '2', key: hookKey });
+  eq(srv.sms.map(m => m.body), ['PHLO: esta entrega ya terminó.'], 'texting: finished stop answered');
   srv.sms.length = 0;
-  srv.twilio({ From: '+13105550000', Body: '1', key: hookKey });
+  srv.quo({ from: '+13105550000', body: '1', key: hookKey });
   eq(srv.sms.length, 0, 'texting: unknown numbers get no answer');
 
   // Texting not set up: nothing goes out, and the office sees why.
   const off = require('./fake-apps-script')({ adminTokens: { good: 'yourphlo@gmail.com' }, now: '2026-10-22T08:00:00' });
   off.post({ action: 'admin.publish', googleToken: 'good', date: '2026-10-22', routes: [{ driverId: 'a', driverName: 'A', start: '09:00', stops: [stop('rx1', 1, '08:20', '6265550101', 'en')] }] });
-  eq(off.post({ action: 'admin.textNow', googleToken: 'good', date: '2026-10-22', stopId: 'rx1' }).sent.err, 'Texting is not set up yet (Twilio).', 'texting: not set up');
-  eq(off.sms.length, 0, 'texting: nothing sent without Twilio');
+  eq(off.post({ action: 'admin.textNow', googleToken: 'good', date: '2026-10-22', stopId: 'rx1' }).sent.err, 'Texting is not set up yet (Quo).', 'texting: not set up');
+  eq(off.sms.length, 0, 'texting: nothing sent without Quo');
 }
 
 try { execFileSync('node', [path.join(root, 'scripts/sync-apps-script.js'), '--check'], { stdio: 'inherit' }); }

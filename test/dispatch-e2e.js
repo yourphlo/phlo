@@ -11,7 +11,7 @@ try { ({ chromium } = require('playwright')); } catch (e) {
 const root = path.join(__dirname, '..');
 const shots = process.argv[2];
 const DISPATCH = 'https://script.google.com/macros/s/fake/exec';
-const server = require('./fake-apps-script')({ adminTokens: { fake: 'yourphlo@gmail.com' }, today: '2026-10-22', twilio: true });
+const server = require('./fake-apps-script')({ adminTokens: { fake: 'yourphlo@gmail.com' }, today: '2026-10-22', quo: true });
 
 const web = http.createServer((req, res) => {
   const f = path.join(root, 'web', decodeURIComponent(req.url.split('?')[0]).replace(/^\/$/, '/index.html'));
@@ -282,7 +282,7 @@ async function setup(page, errors) {
   await office.click('#dp-live li:has-text("DOE,JANE") .linkish:text-matches("Text (now|again)")');
   await office.waitForFunction(() => document.querySelector('#dp-live').textContent.includes('Texted '));
   const toDoe = server.sms.filter(m => m.to === '+16265550101');
-  check(toDoe.length >= 1 && toDoe[0].body.startsWith('Entrega de farmacia PHLO'), 'texts: DOE texted in Spanish');
+  check(toDoe.length >= 1 && toDoe[0].body.startsWith('Entrega PHLO'), 'texts: DOE texted in Spanish');
   const token = toDoe[0].body.match(/#t=(\w+)/)[1];
   // The patient opens the link and asks to leave it at the front door.
   const perrors = [];
@@ -320,7 +320,7 @@ async function setup(page, errors) {
   await rx.fill('#ask-approve [name="position"]', 'Pharmacist');
   await rx.click('#ask-approve [data-ok="1"]');
   await rx.waitForFunction(() => document.querySelector('#rx-stops').textContent.includes('OK\'d by Jane Kim, Pharmacist'));
-  check(server.sms.some(m => m.to === '+16265550101' && m.body.startsWith('您的药房已批准将药品放在前门')), 'texts: patient told it was approved, in the language they picked (Chinese)');
+  check(server.sms.some(m => m.to === '+16265550101' && m.body.startsWith('PHLO：您的送货有新消息')), 'texts: patient told there is an update, in the language they picked (Chinese)');
   // The office asks Ana to bring KAY back.
   await office.click('#dp-live-refresh');
   await office.waitForFunction(() => document.querySelector('#dp-live').textContent.includes('OK\'d by Jane Kim'));
@@ -330,7 +330,7 @@ async function setup(page, errors) {
   await office.check('#ask-message input[value="pickup"]');
   await office.click('#ask-message [data-send]');
   await office.waitForFunction(() => document.querySelector('#dp-live').textContent.includes('To driver: Please RTS to RX [1000005, KAY,BO]: PT will pick up @ RX instead'));
-  check(server.sms.some(m => m.to === '+15555550100' && m.body.includes('Please RTS to RX [1000005, KAY,BO]')), 'texts: driver texted the RTS message');
+  check(server.sms.some(m => m.to === '+15555550100' && /^PHLO: new message for stop \d+\. Open the PHLO app\.$/.test(m.body)), 'texts: driver texted about the message, with no details');
   // Ana's phone: the message, the approval, and a photo is required.
   await phone.click('#dv-refresh');
   await phone.waitForSelector('#dv-msgs:not([hidden])');

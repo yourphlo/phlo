@@ -30,27 +30,42 @@ Driver logins (app username + scrambled PIN) are copied here from the Drivers ta
 Then open the page, sign in with Google, give each driver an **App PIN** on the Drivers tab, and the
 Driver sign-in box appears on the start page.
 
-## Patient texts (Twilio, about 20 minutes plus the wait for approval)
+## Patient texts (Quo, about 20 minutes plus the wait for approval)
 
-1. Make an account at https://www.twilio.com and buy a local phone number that can text (about $1.15 a
-   month; texts are about a cent each, more for long or non-English texts).
-2. **Register for business texting.** US carriers block texts from unregistered numbers. In Twilio:
-   **Messaging > Regulatory compliance > A2P 10DLC**: register the business (brand) and a campaign
-   ("Delivery notifications"). Approval usually takes a few days. (A toll-free number with toll-free
-   verification works too.)
-3. In the Apps Script project: **Project Settings > Script properties > Add**:
-   `TWILIO_SID` (Account SID, starts with AC), `TWILIO_TOKEN` (Auth token) and `TWILIO_FROM` (the number,
-   like `+16265550000`, or a Messaging Service SID starting with MG). They stay in the script, never in GitHub.
-4. Deploy the new version (below) and allow the new permissions it asks for (sending email and running on a timer).
-5. On the PHLO page: **Dispatch > Texting settings**. Copy the **Address for patients' replies** and paste
-   it in Twilio: **Phone Numbers > your number > Messaging configuration > A message comes in: Webhook,
-   HTTP POST**. Fill in each pharmacy's mobile and/or email and sign-in PIN and **Save** (saving also starts
-   the 5-minute timer that sends the texts).
-6. Try it: put your own mobile on a stop, send routes, and click **Text now** on that stop under Deliveries.
+PHLO texts through [Quo](https://www.quo.com) (formerly OpenPhone).
 
-**HIPAA:** texts say only that a pharmacy delivery is on the way (no names or medications). Twilio signs a
-BAA only on some plans, and a free gmail.com account has no BAA with Google. Check with your compliance
-person before using it with patients.
+1. Make a Quo account with a local number that can text. API texts cost $0.01 per segment and come out of
+   prepaid credits: in Quo, **Settings > Billing**, add credits (and turn on auto-recharge so texts don't
+   stop when they run out).
+2. **Register for business texting.** US carriers block texts from unregistered numbers. In Quo's
+   settings, find **US carrier registration** (A2P 10DLC) and register the business. Approval
+   usually takes a few days. Until it is approved, Quo refuses the texts and each stop shows why.
+3. Make an API key: in Quo's settings, **API > Generate API key** (Owner or Admin only).
+4. In the Apps Script project: **Project Settings > Script properties > Add**:
+   `QUO_API_KEY` (the key) and `QUO_FROM` (your Quo number, like `+16265550000`, or its Quo id starting
+   with PN). They stay in the script, never in GitHub.
+5. Deploy the new version (below) and allow the new permissions it asks for (sending email and running on a timer).
+6. On the PHLO page: **Dispatch > Texting settings**. Copy the **Address for patients' replies**. In Quo:
+   **Settings > Webhooks > Create webhook**, paste the address, pick the event **message.received** and
+   your PHLO number, and save. Fill in each pharmacy's mobile and/or email and sign-in PIN and **Save**
+   (saving also starts the 5-minute timer that sends the texts).
+7. Try it: put your own mobile on a stop, send routes, and click **Text now** on that stop under Deliveries.
+   Then text anything back from your phone: you should get the reply-page link back. Tap it and answer.
+
+Moving from Twilio: the old `TWILIO_*` script properties are no longer used; you can delete them. Turn off
+the "A message comes in" webhook on the Twilio number (or release the number) once Quo works.
+
+Each reply from a patient is handled once, even if Quo sends it again (Quo resends when it is not sure the
+script got it).
+
+**HIPAA:** no text has patient details: not "pharmacy" or "medication", no name, RX number, address or
+answer. Patients answer on the reply page, drivers and pharmacies read the details after signing in, and a
+text back from a patient only gets the link again (STOP still works). Quo signs a
+BAA only on the Business and Scale plans, and its BAA says text messaging (SMS/MMS) is **not** a covered
+service. Quo allows texting patients only if you get each patient's OK to be texted, keep health
+information in texts to the minimum, and write that decision and its risks into your HIPAA policies; you
+carry the responsibility for what the texts say. A free gmail.com account has no BAA
+with Google. Check with your compliance person before using it with patients.
 
 ## Updating
 
