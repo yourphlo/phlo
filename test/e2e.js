@@ -38,6 +38,8 @@ const server = http.createServer((req, res) => {
   const f = path.join(root, 'web', decodeURIComponent(req.url.split('?')[0]).replace(/^\/$/, '/index.html'));
   if (!f.startsWith(path.join(root, 'web')) || !fs.existsSync(f)) { res.writeHead(404); return res.end(); }
   res.writeHead(200, { 'Content-Type': f.endsWith('.js') ? 'text/javascript' : f.endsWith('.css') ? 'text/css' : 'text/html' });
+  // XLSX_JS may be another build than the page's, so drop the page's integrity check.
+  if (f.endsWith('.html')) return res.end(fs.readFileSync(f, 'utf8').replace(/ integrity="[^"]*"/g, ''));
   fs.createReadStream(f).pipe(res);
 });
 

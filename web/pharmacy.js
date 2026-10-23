@@ -9,6 +9,8 @@
   var $ = function (id) { return document.getElementById(id); };
   var KEY = 'phlo.rx';
   var me = null, data = null, timer = null;
+  // Pharmacy computers are shared: sign out after this long with nobody using the page.
+  var IDLE_MIN = 30, idleTimer = null;
 
   function el(tag, attrs, children) {
     var n = document.createElement(tag);
@@ -29,7 +31,24 @@
   }
 
   function saved() {
-    try { var s = JSON.parse(localStorage.getItem(KEY) || 'null'); return s && s.session && s.expires > Date.now() ? s : null; } catch (e) { return null; }
+    try {
+      var s = JSON.parse(localStorage.getItem(KEY) || 'null');
+      return s && s.session && s.expires > Date.now() && Date.now() - (s.active || 0) < IDLE_MIN * 60e3 ? s : null;
+    } catch (e) { return null; }
+  }
+
+  /** Someone used the page: push the idle sign-out back (saved at most once a minute). */
+  function active() {
+    if (!me || Date.now() - (me.active || 0) < 60e3) return;
+    me.active = Date.now();
+    try { localStorage.setItem(KEY, JSON.stringify(me)); } catch (x) { /* storage blocked */ }
+  }
+
+  function checkIdle() {
+    if (!me || Date.now() - (me.active || 0) < IDLE_MIN * 60e3) return;
+    logout(false);
+    var err = $('rx-login-error');
+    err.textContent = 'Signed out after ' + IDLE_MIN + ' minutes without use. Sign in again.'; err.hidden = false;
   }
 
   function login(e) {
@@ -41,7 +60,7 @@
     var btn = f.querySelector('button[type="submit"]');
     btn.disabled = true;
     phloBackend.call('rx.login', { store: store, pin: pin }).then(function (r) {
-      me = { session: r.session, name: r.name, expires: r.expires };
+      me = { session: r.session, name: r.name, expires: r.expires, active: Date.now() };
       try { localStorage.setItem(KEY, JSON.stringify(me)); } catch (x) { /* storage blocked: signed in for this visit */ }
       f.reset();
       enter();
@@ -54,6 +73,7 @@
     me = null; data = null;
     try { localStorage.removeItem(KEY); } catch (x) { /* storage blocked */ }
     clearInterval(timer);
+    clearInterval(idleTimer);
     document.body.classList.remove('rx-mode');
     $('view-rx').hidden = true;
     $('driver-signout').hidden = true;
@@ -73,6 +93,8 @@
     $('driver-signout').hidden = false;
     $('who').textContent = 'Pharmacy ' + me.name;
     $('rx-title').textContent = 'Pharmacy ' + me.name;
+    clearInterval(idleTimer);
+    idleTimer = setInterval(checkIdle, 30e3);
     load();
     clearInterval(timer);
     timer = setInterval(function () { if (!document.hidden && !document.querySelector('dialog[open]')) load(); }, 60000);
@@ -163,7 +185,12 @@
     $('driver-signout').addEventListener('click', function () { if (me) logout(false); });
     $('rx-refresh').addEventListener('click', load);
     $('rx-date').addEventListener('change', load);
-    document.addEventListener('visibilitychange', function () { if (!document.hidden && me && !document.querySelector('dialog[open]')) load(); });
+    ['pointerdown', 'keydown', 'touchstart', 'wheel'].forEach(function (ev) { document.addEventListener(ev, active, { passive: true }); });
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden || !me) return;
+      checkIdle();
+      if (me && !document.querySelector('dialog[open]')) load();
+    });
     me = saved();
     if (me) enter();
   });

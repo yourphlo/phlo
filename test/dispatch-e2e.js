@@ -18,6 +18,8 @@ const web = http.createServer((req, res) => {
   if (!fs.existsSync(f)) { res.writeHead(404); return res.end(); }
   let body = fs.readFileSync(f);
   if (f.endsWith('config.js')) body = String(body).replace(/dispatchUrl: '[^']*'/, `dispatchUrl: '${DISPATCH}'`);
+  // The xlsx library is faked below, so its integrity check would block it.
+  if (f.endsWith('.html')) body = String(body).replace(/ integrity="[^"]*"/g, '');
   res.writeHead(200, { 'Content-Type': f.endsWith('.js') ? 'text/javascript' : f.endsWith('.css') ? 'text/css' : 'text/html' });
   res.end(body);
 });
@@ -114,8 +116,8 @@ async function setup(page, errors) {
   await office.click('.dname:has-text("Ana Ruiz")');
   await office.fill('#driver-form [name="pin"]', '12');
   await office.click('#driver-form button[type=submit]');
-  check(await office.isVisible('#driver-errors li:has-text("4 to 6 digits")'), 'short PIN refused');
-  await office.fill('#driver-form [name="pin"]', '4321');
+  check(await office.isVisible('#driver-errors li:has-text("6 digits")'), 'short PIN refused');
+  await office.fill('#driver-form [name="pin"]', '864321');
   await office.click('#driver-form button[type=submit]');
   await office.waitForSelector('#driver-form-card[hidden]', { state: 'attached' });
   await office.waitForTimeout(1200);
@@ -220,7 +222,7 @@ async function setup(page, errors) {
   await office.waitForSelector('#ts-rx tr[data-code="BP"]');
   check((await office.textContent('#ts-status')).includes('Texting is on'), 'texts: settings say texting is on');
   await office.fill('#ts-rx tr[data-code="BP"] [name="phone"]', '626 555 0300');
-  await office.fill('#ts-rx tr[data-code="BP"] [name="pin"]', '2468');
+  await office.fill('#ts-rx tr[data-code="BP"] [name="pin"]', '246810');
   await office.click('#ts-save');
   await office.waitForFunction(() => (document.querySelector('#ts-rx tr[data-code="BP"] [name="pin"]') || {}).placeholder === 'New PIN (has one)');
   check(JSON.parse(server.props.rxAccounts).bp.hash.length === 64, 'texts: BP pharmacy PIN saved on the server');
@@ -239,7 +241,7 @@ async function setup(page, errors) {
   await phone.click('#driver-login button[type=submit]');
   await phone.waitForSelector('#driver-login-error:not([hidden])');
   check((await phone.textContent('#driver-login-error')).includes('Wrong'), 'wrong PIN refused');
-  await phone.fill('#driver-login [name="pin"]', '4321');
+  await phone.fill('#driver-login [name="pin"]', '864321');
   await phone.click('#driver-login button[type=submit]');
   await phone.waitForSelector('.dv-stop');
   const dstops = await phone.$$eval('.dv-stop .nm', l => l.map(x => x.textContent));
@@ -306,7 +308,7 @@ async function setup(page, errors) {
   await setup(rx, rxerrors);
   await rx.goto(base);
   await rx.fill('#rx-login [name="store"]', 'bp');
-  await rx.fill('#rx-login [name="pin"]', '2468');
+  await rx.fill('#rx-login [name="pin"]', '246810');
   await rx.click('#rx-login button[type=submit]');
   await rx.waitForSelector('#rx-stops li');
   const rxTxt = await rx.textContent('#rx-stops');

@@ -7,7 +7,9 @@ yourphlo Google account and keeps everything in a **PHLO Dispatch** folder in th
 - `updates-YYYY-MM-DD.json`: what drivers recorded at each stop,
 - `files-YYYY-MM-DD/`: delivery photos and signatures,
 - `texts-YYYY-MM-DD.json`: patients' mobile numbers, texts sent and received, approvals, messages to drivers,
-- `patients.json`: each patient's mobile number and language, to fill them in next time.
+- `patients.json`: each patient's mobile number and language, to fill them in next time,
+- `access-log/access-YYYY-MM-DD.json`: who signed in or tried to, who changed what, and who looked at which day
+  (no patient names or addresses). Views are logged once an hour per person, since the pages refresh every minute.
 
 Driver logins (app username + scrambled PIN) are copied here from the Drivers tab automatically.
 

@@ -20,6 +20,8 @@ var ADMINS = ['yourphlo@gmail.com'];      // Google accounts allowed to send rou
 var TIME_ZONE = 'America/Los_Angeles';
 var SESSION_HOURS = 16;                    // how long a driver stays signed in
 var MAX_TRIES = 5, LOCK_MINUTES = 15;      // wrong PINs before a username is locked for a while
+var MAX_TRIES_LONG = 20, LOCK_HOURS = 6;   // wrong PINs in 6 hours before it is locked for 6 hours
+var DRIVER_DAYS_BACK = 1;                  // drivers see their route for today, coming days and this many days back
 var FOLDER_NAME = 'PHLO Dispatch';
 var PAGE_URL = 'https://yourphlo.github.io/phlo/'; // the PHLO page (patients' reply links point here)
 
@@ -38,8 +40,10 @@ function doPost(e) {
     if (!fn) throw new Error('Unknown action.');
     var res = fn(req) || {};
     res.ok = true;
+    audit_(req, true, '');
     return out_(res);
   } catch (err) {
+    audit_(req, false, err.message);
     return out_({ ok: false, error: err.message, auth: !!err.auth });
   }
 }
@@ -136,7 +140,7 @@ var ACTIONS = {
         pharmacies[c] = { phone: phloE164(p.phone), email: /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(p.email || '').trim()) ? String(p.email).trim() : '' };
         var pin = String(p.pin || '').trim();
         if (pin) {
-          if (!/^\d{4,8}$/.test(pin)) throw new Error('A pharmacy PIN must be 4 to 8 digits (' + c + ').');
+          if (!/^\d{6,8}$/.test(pin)) throw new Error('A pharmacy PIN must be 6 to 8 digits (' + c + ').');
           var salt = Utilities.getUuid();
           accounts[k] = { code: c, salt: salt, hash: hash_(salt, pin) };
           endRxSessions_(c);
@@ -200,15 +204,14 @@ var ACTIONS = {
 
   'driver.login': function (req) {
     var u = String(req.username || '').trim().toLowerCase();
-    var cache = CacheService.getScriptCache(), key = 'fails_' + u;
-    var fails = +(cache.get(key) || 0);
-    if (fails >= MAX_TRIES) throw authError_('Too many wrong tries. Wait ' + LOCK_MINUTES + ' minutes and try again.');
+    var key = 'fails_' + u;
+    checkTries_(key);
     var acc = JSON.parse(props_().getProperty('accounts') || '{}')[u];
     if (!acc || !acc.hash || hash_(acc.salt, String(req.pin || '').trim()) !== acc.hash) {
-      cache.put(key, String(fails + 1), LOCK_MINUTES * 60);
+      failedTry_(key);
       throw authError_('Wrong name or PIN.');
     }
-    cache.remove(key);
+    CacheService.getScriptCache().remove(key);
     var token = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
     var exp = Date.now() + SESSION_HOURS * 3600e3;
     eachSession_(function (k, s) { if (s.exp < Date.now()) props_().deleteProperty(k); });
@@ -227,8 +230,9 @@ var ACTIONS = {
     var dates = JSON.parse(props_().getProperty('dates') || '[]');
     var today = Utilities.formatDate(new Date(), TIME_ZONE, 'yyyy-MM-dd');
     // The asked date; else today's route; else the next one coming up; else the latest.
-    var order = req.date ? [isoDate_(req.date)] :
-      [today].concat(dates.filter(function (d) { return d > today; }), dates.filter(function (d) { return d < today; }).reverse());
+    var first = driverFirstDay_();
+    var order = req.date ? [driverDate_(req.date)] :
+      [today].concat(dates.filter(function (d) { return d > today; }), dates.filter(function (d) { return d < today && d >= first; }).reverse());
     for (var i = 0; i < order.length; i++) {
       var plan = readJson_('routes-' + order[i] + '.json');
       var mine = plan && plan.routes.filter(function (r) { return r.driverId === s.driverId; })[0];
@@ -276,7 +280,7 @@ var ACTIONS = {
 
   'driver.update': function (req) {
     var s = driverSession_(req);
-    var date = isoDate_(req.date);
+    var date = driverDate_(req.date);
     var plan = readJson_('routes-' + date + '.json');
     var mine = plan && plan.routes.filter(function (r) { return r.driverId === s.driverId; })[0];
     var stop = mine && mine.stops.filter(function (st) { return st.id === req.stopId; })[0];
@@ -306,6 +310,12 @@ var ACTIONS = {
       var old = all[stop.id] || {};
       rec.photoId = u.photo ? save(u.photo, 'photo') : (u.keepPhoto ? old.photoId || '' : '');
       rec.signatureId = u.signature ? save(u.signature, 'signature') : (u.keepSignature ? old.signatureId || '' : '');
+      // Keep what was recorded before (a change never erases the earlier record).
+      if (old.at) {
+        var before = {};
+        Object.keys(old).forEach(function (k) { if (k !== 'history') before[k] = old[k]; });
+        rec.history = (old.history || []).concat([before]).slice(-20);
+      }
       all[stop.id] = rec;
       writeJson_('updates-' + date + '.json', all);
     });
@@ -315,7 +325,7 @@ var ACTIONS = {
 
   'driver.file': function (req) {
     var s = driverSession_(req);
-    var date = isoDate_(req.date);
+    var date = driverDate_(req.date);
     var all = readJson_('updates-' + date + '.json') || {};
     var ok = Object.keys(all).some(function (k) {
       return all[k].driverId === s.driverId && (all[k].photoId === req.fileId || all[k].signatureId === req.fileId);
@@ -374,15 +384,14 @@ var ACTIONS = {
 
   'rx.login': function (req) {
     var code = String(req.store || '').trim().toLowerCase();
-    var cache = CacheService.getScriptCache(), key = 'rxfails_' + code;
-    var fails = +(cache.get(key) || 0);
-    if (fails >= MAX_TRIES) throw authError_('Too many wrong tries. Wait ' + LOCK_MINUTES + ' minutes and try again.');
+    var key = 'rxfails_' + code;
+    checkTries_(key);
     var acc = JSON.parse(props_().getProperty('rxAccounts') || '{}')[code];
     if (!acc || hash_(acc.salt, String(req.pin || '').trim()) !== acc.hash) {
-      cache.put(key, String(fails + 1), LOCK_MINUTES * 60);
+      failedTry_(key);
       throw authError_('Wrong pharmacy or PIN.');
     }
-    cache.remove(key);
+    CacheService.getScriptCache().remove(key);
     var token = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
     var exp = Date.now() + SESSION_HOURS * 3600e3;
     eachSession_(function (k, s) { if (s.exp < Date.now()) props_().deleteProperty(k); });
@@ -454,6 +463,80 @@ function isoDate_(v) {
   return String(v);
 }
 
+/** The oldest day a driver can still open (only what they need: today, coming days, and yesterday). */
+function driverFirstDay_() {
+  return Utilities.formatDate(new Date(Date.now() - DRIVER_DAYS_BACK * 864e5), TIME_ZONE, 'yyyy-MM-dd');
+}
+
+function driverDate_(v) {
+  var d = isoDate_(v);
+  if (d < driverFirstDay_()) throw new Error('That route is closed. Ask the PHLO office if you need it.');
+  return d;
+}
+
+/** Wrong-PIN limits: 5 tries, then 15 minutes; 20 tries in 6 hours, then 6 hours. */
+function checkTries_(key) {
+  var cache = CacheService.getScriptCache();
+  if (+(cache.get(key + '_long') || 0) >= MAX_TRIES_LONG) throw authError_('Too many wrong tries. This sign-in is locked for a few hours; ask the PHLO office.');
+  if (+(cache.get(key) || 0) >= MAX_TRIES) throw authError_('Too many wrong tries. Wait ' + LOCK_MINUTES + ' minutes and try again.');
+}
+
+function failedTry_(key) {
+  var cache = CacheService.getScriptCache();
+  cache.put(key, String(+(cache.get(key) || 0) + 1), LOCK_MINUTES * 60);
+  cache.put(key + '_long', String(+(cache.get(key + '_long') || 0) + 1), LOCK_HOURS * 3600);
+}
+
+/* =========================== access log =========================== */
+
+var WHO = ''; // who is making this request (set when their sign-in is checked)
+
+// Actions that only show data. Pages refresh them every minute, so each is logged once an hour per person.
+var AUDIT_VIEWS = { 'admin.status': 1, 'admin.patients': 1, 'admin.file': 1, 'admin.textSettings': 1, 'driver.route': 1,
+  'driver.file': 1, 'rx.day': 1, 'rx.file': 1, 'patient.get': 1 };
+
+/**
+ * Writes who did what, and when, to "access-log/access-YYYY-MM-DD.json" in the PHLO Dispatch folder:
+ * sign-ins (and wrong PINs), every change, and who looked at which day's deliveries. No patient details
+ * are written, only the stop id. Keep these files (HIPAA asks for 6 years of records like this).
+ */
+function audit_(req, ok, err) {
+  try {
+    var action = String(req.action || '');
+    if (!ACTIONS[action]) return;
+    var who = WHO;
+    if (!who) {
+      if (action === 'driver.login') who = 'driver sign-in as "' + String(req.username || '').trim().toLowerCase().slice(0, 40) + '"';
+      else if (action === 'rx.login') who = 'pharmacy sign-in as "' + String(req.store || '').trim().toUpperCase().slice(0, 30) + '"';
+      else if (action.indexOf('patient.') === 0) who = 'patient reply link';
+      else who = 'not signed in';
+    }
+    var date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.date || '')) ? String(req.date) : '';
+    var stop = String(req.stopId || '').slice(0, 60), file = String(req.fileId || req.which || '').slice(0, 80);
+    if (ok && action === 'admin.textSettings' && req.set) action = 'admin.textSettings (saved)';
+    if (ok && AUDIT_VIEWS[action]) {
+      var cache = CacheService.getScriptCache();
+      var key = 'aud_' + hash_('audit', [who, action, date, stop, file].join('|')).slice(0, 40);
+      if (cache.get(key)) return;
+      cache.put(key, '1', 3600);
+    }
+    var entry = { at: new Date().toISOString(), who: who, action: action, ok: ok };
+    if (date) entry.date = date;
+    if (stop) entry.stop = stop;
+    if (file) entry.file = file;
+    if (!ok) entry.error = String(err || '').slice(0, 200);
+    withLock_(function () {
+      var name = 'access-' + today_() + '.json', folder = subfolder_('access-log');
+      var it = folder.getFilesByName(name), f = it.hasNext() ? it.next() : null;
+      var list = f ? JSON.parse(f.getBlob().getDataAsString() || '[]') : [];
+      list.push(entry);
+      if (f) f.setContent(JSON.stringify(list));
+      else folder.createFile(name, JSON.stringify(list), 'application/json');
+    });
+  } catch (e) { /* the log must never stop the app */ }
+  finally { WHO = ''; }
+}
+
 /** Checks the Google sign-in token the PHLO page sends and that it belongs to an admin account. */
 function admin_(req) {
   var token = String(req.googleToken || '');
@@ -468,6 +551,7 @@ function admin_(req) {
     email = String((JSON.parse(res.getContentText()).user || {}).emailAddress || '').toLowerCase();
     cache.put(key, email, 600);
   }
+  WHO = 'office ' + email;
   if (ADMINS.map(function (a) { return a.toLowerCase(); }).indexOf(email) < 0) throw authError_('This Google account cannot send routes.');
   return email;
 }
@@ -476,6 +560,7 @@ function session_(req) {
   var raw = props_().getProperty('sess_' + String(req.session || ''));
   var s = raw && JSON.parse(raw);
   if (!s || s.exp < Date.now()) throw authError_('Please sign in again.');
+  WHO = s.role === 'rx' ? 'pharmacy ' + s.code : 'driver ' + s.name + ' (' + s.driverId + ')';
   return s;
 }
 
@@ -718,7 +803,10 @@ function askPharmacy_(t, choice) {
   var notes = [];
   if (p.phone) { var r = sendSms_(p.phone, body); notes.push('text ' + (r.ok ? 'sent' : 'not sent: ' + r.err)); }
   if (p.email) {
-    try { MailApp.sendEmail(p.email, 'PHLO: approval needed (RX ' + rx + ')', body); notes.push('email sent'); }
+    // Email (a regular Gmail account) gets no RX number: the pharmacy sees which patient after signing in.
+    var mail = 'PHLO: a patient asks to leave a delivery ' + (choice === 'door' ? 'at the front door' : 'in the mailbox') +
+      ' without a signature. Sign in to approve or decline: ' + pageUrl_() + ' > Pharmacy sign-in.';
+    try { MailApp.sendEmail(p.email, 'PHLO: approval needed', mail); notes.push('email sent'); }
     catch (e) { notes.push('email not sent: ' + e.message); }
   }
   t.approval.asked = notes.join('; ');

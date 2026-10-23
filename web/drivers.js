@@ -119,7 +119,7 @@ function phloValidateDriver(d, others, pin) {
   var login = phloLoginName(d);
   var clash = login && !errs.some(function (e) { return e.field === 'name'; }) && (others || []).filter(function (o) { return o.id !== d.id && phloLoginName(o) === login; })[0];
   if (clash) add('username', clash.name + ' already signs in to the driver app as "' + login + '". Give this driver another app username.');
-  if (pin && !/^\d{4,6}$/.test(pin)) add('pin', 'The app PIN must be 4 to 6 digits.');
+  if (pin && !/^\d{6}$/.test(pin)) add('pin', 'The app PIN must be 6 digits.');
 
   // needBoth: false lets one side stay empty (availability can be just a start or just an end time).
   var pair = function (from, to, label, needBoth) {
