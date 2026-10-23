@@ -534,7 +534,7 @@ function audit_(req, ok, err) {
       else folder.createFile(name, JSON.stringify(list), 'application/json');
     });
   } catch (e) { /* the log must never stop the app */ }
-  WHO = '';
+  finally { WHO = ''; }
 }
 
 /** Checks the Google sign-in token the PHLO page sends and that it belongs to an admin account. */
