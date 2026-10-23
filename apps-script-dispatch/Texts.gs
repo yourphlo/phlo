@@ -1,5 +1,5 @@
 /* PHLO patient texts: the languages, the text messages, the words on the patient's reply page, and the
- * rules for when to text a patient and how to read their reply.
+ * rules for when to text a patient.
  * Shared by the web page and the dispatch server: edit here, then run `node scripts/sync-apps-script.js`
  * to copy it to apps-script-dispatch/Texts.gs. Plain global functions on purpose (browser, Apps Script, Node).
  * Translations were written without a native speaker check: have someone who speaks each language read them. */
@@ -14,7 +14,7 @@ var PHLO_LANGS = [
   { code: 'tl', name: 'Tagalog' }
 ];
 
-// What a patient can answer, in the order of the numbers they reply with (1 = redeliver ... 5 = mailbox).
+// What a patient can answer on the reply page.
 var PHLO_CHOICES = ['redeliver', 'refuse', 'someone', 'door', 'mailbox'];
 
 // How long before the driver arrives the patient gets the "on the way" text (the office can change it).
@@ -27,122 +27,65 @@ var PHLO_RTS_REASONS = [
   { value: 'other', text: 'Other' }
 ];
 
-/* ---------------- text messages (SMS) ---------------- */
+/* ---------------- text messages (SMS) ----------------
+ * HIPAA: texts go through a phone company that does not sign a BAA for texting, so a text never says
+ * "pharmacy" or "medication", never names a patient, an RX number or an address, and never repeats what
+ * a patient answered. Patients answer on the reply page (the link), not by text. */
 
 var PHLO_SMS = {
   en: {
-    eta: 'PHLO pharmacy delivery: your driver is about {min} minutes away (around {time}). Please be home to receive your medications.\n' +
-      'Can\'t be home? Reply:\n1 Redeliver another day (add day & time)\n2 I do not want my medications\n3 Someone else will receive (add name & relation)\n4 Leave at front door\n5 Leave in mailbox\n' +
-      'Or tap {link}\nReply STOP to stop texts.',
-    got_redeliver: 'Thank you. We told your pharmacy to redeliver: {detail}.',
-    got_redeliver_ask: 'Thank you. What day and time work for you? Reply like: 1 Friday after 3pm. Or tap {link}',
-    got_refuse: 'Thank you. We told your pharmacy you do not want this delivery. Please call your pharmacy with any questions.',
-    got_someone: 'Thank you. The driver will give your delivery to: {detail}.',
-    got_someone_ask: 'Thank you. Who will receive it? Reply like: 3 Maria, daughter. Or tap {link}',
-    got_leave: 'Thank you. Your pharmacy must approve leaving your medications without a signature. We will text you when they answer.',
-    approved_door: 'Your pharmacy approved leaving your delivery at the front door without a signature. The driver will take a photo.',
-    approved_mailbox: 'Your pharmacy approved leaving your delivery in the mailbox without a signature. The driver will take a photo.',
-    declined: 'Your pharmacy needs someone to sign for this delivery. Reply 1 to redeliver another day, or 3 if someone else will be home.',
-    unknown: 'Sorry, we did not understand. Reply 1, 2, 3, 4 or 5, or tap {link}',
-    closed: 'This delivery is already finished. Please call your pharmacy with any questions.'
+    eta: 'PHLO delivery: your driver is about {min} minutes away (around {time}). Can\'t be home? Tap {link}\nReply STOP to stop texts.',
+    update: 'PHLO: there is an update on your delivery. Tap {link}',
+    use_link: 'PHLO: we can\'t take answers by text. Please tap {link}',
+    closed: 'PHLO: this delivery is finished.'
   },
   es: {
-    eta: 'Entrega de farmacia PHLO: su chofer llegará en unos {min} minutos (alrededor de las {time}). Por favor esté en casa para recibir sus medicamentos.\n' +
-      '¿No estará en casa? Responda:\n1 Entregar otro día (agregue día y hora)\n2 No quiero mis medicamentos\n3 Otra persona lo recibirá (agregue nombre y parentesco)\n4 Dejar en la puerta principal\n5 Dejar en el buzón\n' +
-      'O toque {link}\nResponda STOP para no recibir más mensajes.',
-    got_redeliver: 'Gracias. Le avisamos a su farmacia que entregue otro día: {detail}.',
-    got_redeliver_ask: 'Gracias. ¿Qué día y hora le conviene? Responda por ejemplo: 1 viernes después de las 3pm. O toque {link}',
-    got_refuse: 'Gracias. Le avisamos a su farmacia que no quiere esta entrega. Llame a su farmacia si tiene preguntas.',
-    got_someone: 'Gracias. El chofer entregará su paquete a: {detail}.',
-    got_someone_ask: 'Gracias. ¿Quién lo recibirá? Responda por ejemplo: 3 María, hija. O toque {link}',
-    got_leave: 'Gracias. Su farmacia debe aprobar que se deje sin firma. Le enviaremos un mensaje cuando respondan.',
-    approved_door: 'Su farmacia aprobó dejar su entrega en la puerta principal sin firma. El chofer tomará una foto.',
-    approved_mailbox: 'Su farmacia aprobó dejar su entrega en el buzón sin firma. El chofer tomará una foto.',
-    declined: 'Su farmacia necesita que alguien firme esta entrega. Responda 1 para entregar otro día, o 3 si otra persona estará en casa.',
-    unknown: 'Lo sentimos, no entendimos. Responda 1, 2, 3, 4 o 5, o toque {link}',
-    closed: 'Esta entrega ya terminó. Llame a su farmacia si tiene preguntas.'
+    eta: 'Entrega PHLO: su chofer llegará en unos {min} minutos (alrededor de las {time}). ¿No estará en casa? Toque {link}\nResponda STOP para no recibir más mensajes.',
+    update: 'PHLO: hay novedades sobre su entrega. Toque {link}',
+    use_link: 'PHLO: no podemos recibir respuestas por mensaje de texto. Por favor toque {link}',
+    closed: 'PHLO: esta entrega ya terminó.'
   },
   zh: {
-    eta: 'PHLO药房送货：司机大约{min}分钟后到达（约{time}）。请在家签收您的药品。\n' +
-      '不在家？请回复：\n1 改天再送（请写日期和时间）\n2 我不要这些药\n3 由他人代收（请写姓名和关系）\n4 放在前门\n5 放在信箱\n' +
-      '或点击 {link}\n回复STOP停止接收短信。',
-    got_redeliver: '谢谢。我们已通知您的药房改天再送：{detail}。',
-    got_redeliver_ask: '谢谢。哪天什么时间方便？请回复，例如：1 星期五下午3点以后。或点击 {link}',
-    got_refuse: '谢谢。我们已通知您的药房您不要这次送货。如有问题请致电您的药房。',
-    got_someone: '谢谢。司机会把药交给：{detail}。',
-    got_someone_ask: '谢谢。由谁代收？请回复，例如：3 王丽，女儿。或点击 {link}',
-    got_leave: '谢谢。不签收放下药品需要您的药房批准。药房回复后我们会发短信通知您。',
-    approved_door: '您的药房已批准将药品放在前门，无需签名。司机会拍照。',
-    approved_mailbox: '您的药房已批准将药品放在信箱，无需签名。司机会拍照。',
-    declined: '您的药房需要有人签收这次送货。请回复1改天再送，或回复3由他人代收。',
-    unknown: '抱歉，我们没有看懂。请回复1、2、3、4或5，或点击 {link}',
-    closed: '这次送货已经完成。如有问题请致电您的药房。'
+    eta: 'PHLO送货：司机大约{min}分钟后到达（约{time}）。不在家？请点击 {link}\n回复STOP停止接收短信。',
+    update: 'PHLO：您的送货有新消息。请点击 {link}',
+    use_link: 'PHLO：我们无法通过短信接收回复。请点击 {link}',
+    closed: 'PHLO：这次送货已经完成。'
   },
   'zh-Hant': {
-    eta: 'PHLO藥房送貨：司機大約{min}分鐘後到達（約{time}）。請在家簽收您的藥品。\n' +
-      '不在家？請回覆：\n1 改天再送（請寫日期和時間）\n2 我不要這些藥\n3 由他人代收（請寫姓名和關係）\n4 放在前門\n5 放在信箱\n' +
-      '或點擊 {link}\n回覆STOP停止接收簡訊。',
-    got_redeliver: '謝謝。我們已通知您的藥房改天再送：{detail}。',
-    got_redeliver_ask: '謝謝。哪天什麼時間方便？請回覆，例如：1 星期五下午3點以後。或點擊 {link}',
-    got_refuse: '謝謝。我們已通知您的藥房您不要這次送貨。如有問題請致電您的藥房。',
-    got_someone: '謝謝。司機會把藥交給：{detail}。',
-    got_someone_ask: '謝謝。由誰代收？請回覆，例如：3 王麗，女兒。或點擊 {link}',
-    got_leave: '謝謝。不簽收放下藥品需要您的藥房批准。藥房回覆後我們會發簡訊通知您。',
-    approved_door: '您的藥房已批准將藥品放在前門，無需簽名。司機會拍照。',
-    approved_mailbox: '您的藥房已批准將藥品放在信箱，無需簽名。司機會拍照。',
-    declined: '您的藥房需要有人簽收這次送貨。請回覆1改天再送，或回覆3由他人代收。',
-    unknown: '抱歉，我們沒有看懂。請回覆1、2、3、4或5，或點擊 {link}',
-    closed: '這次送貨已經完成。如有問題請致電您的藥房。'
+    eta: 'PHLO送貨：司機大約{min}分鐘後到達（約{time}）。不在家？請點擊 {link}\n回覆STOP停止接收簡訊。',
+    update: 'PHLO：您的送貨有新消息。請點擊 {link}',
+    use_link: 'PHLO：我們無法透過簡訊接收回覆。請點擊 {link}',
+    closed: 'PHLO：這次送貨已經完成。'
   },
   vi: {
-    eta: 'Giao thuốc PHLO: tài xế sẽ đến trong khoảng {min} phút (khoảng {time}). Xin vui lòng ở nhà để nhận thuốc.\n' +
-      'Không có nhà? Trả lời:\n1 Giao lại ngày khác (ghi ngày và giờ)\n2 Tôi không muốn nhận thuốc\n3 Người khác sẽ nhận (ghi tên và quan hệ)\n4 Để ở cửa trước\n5 Để trong hộp thư\n' +
-      'Hoặc bấm {link}\nTrả lời STOP để ngừng nhận tin nhắn.',
-    got_redeliver: 'Cảm ơn. Chúng tôi đã báo nhà thuốc giao lại: {detail}.',
-    got_redeliver_ask: 'Cảm ơn. Ngày giờ nào tiện cho quý vị? Trả lời ví dụ: 1 thứ Sáu sau 3 giờ chiều. Hoặc bấm {link}',
-    got_refuse: 'Cảm ơn. Chúng tôi đã báo nhà thuốc rằng quý vị không muốn nhận lần giao này. Xin gọi nhà thuốc nếu có thắc mắc.',
-    got_someone: 'Cảm ơn. Tài xế sẽ giao cho: {detail}.',
-    got_someone_ask: 'Cảm ơn. Ai sẽ nhận? Trả lời ví dụ: 3 Lan, con gái. Hoặc bấm {link}',
-    got_leave: 'Cảm ơn. Nhà thuốc phải đồng ý để lại thuốc mà không cần chữ ký. Chúng tôi sẽ nhắn tin khi nhà thuốc trả lời.',
-    approved_door: 'Nhà thuốc đã đồng ý để thuốc ở cửa trước, không cần chữ ký. Tài xế sẽ chụp hình.',
-    approved_mailbox: 'Nhà thuốc đã đồng ý để thuốc trong hộp thư, không cần chữ ký. Tài xế sẽ chụp hình.',
-    declined: 'Nhà thuốc cần có người ký nhận lần giao này. Trả lời 1 để giao lại ngày khác, hoặc 3 nếu có người khác ở nhà.',
-    unknown: 'Xin lỗi, chúng tôi không hiểu. Trả lời 1, 2, 3, 4 hoặc 5, hoặc bấm {link}',
-    closed: 'Lần giao này đã xong. Xin gọi nhà thuốc nếu có thắc mắc.'
+    eta: 'Giao hàng PHLO: tài xế sẽ đến trong khoảng {min} phút (khoảng {time}). Không có nhà? Bấm {link}\nTrả lời STOP để ngừng nhận tin nhắn.',
+    update: 'PHLO: có thông tin mới về lần giao hàng của quý vị. Bấm {link}',
+    use_link: 'PHLO: chúng tôi không nhận trả lời qua tin nhắn. Xin bấm {link}',
+    closed: 'PHLO: lần giao hàng này đã xong.'
   },
   ko: {
-    eta: 'PHLO 약국 배달: 기사님이 약 {min}분 후 도착합니다 ({time}경). 약을 받으실 수 있도록 댁에 계셔 주세요.\n' +
-      '댁에 안 계시나요? 답장해 주세요:\n1 다른 날 다시 배달 (날짜와 시간 입력)\n2 약을 받지 않겠습니다\n3 다른 사람이 받습니다 (이름과 관계 입력)\n4 현관문 앞에 놓아 주세요\n5 우편함에 넣어 주세요\n' +
-      '또는 {link} 를 누르세요\n문자를 그만 받으시려면 STOP이라고 답장하세요.',
-    got_redeliver: '감사합니다. 약국에 다시 배달하도록 알렸습니다: {detail}.',
-    got_redeliver_ask: '감사합니다. 언제가 편하신가요? 예: 1 금요일 오후 3시 이후. 또는 {link} 를 누르세요',
-    got_refuse: '감사합니다. 이번 배달을 원하지 않으신다고 약국에 알렸습니다. 문의 사항은 약국에 전화해 주세요.',
-    got_someone: '감사합니다. 기사님이 다음 분께 전달하겠습니다: {detail}.',
-    got_someone_ask: '감사합니다. 누가 받으시나요? 예: 3 김민지, 딸. 또는 {link} 를 누르세요',
-    got_leave: '감사합니다. 서명 없이 두고 가려면 약국의 승인이 필요합니다. 약국이 답하면 문자로 알려 드리겠습니다.',
-    approved_door: '약국이 서명 없이 현관문 앞에 두는 것을 승인했습니다. 기사님이 사진을 찍습니다.',
-    approved_mailbox: '약국이 서명 없이 우편함에 넣는 것을 승인했습니다. 기사님이 사진을 찍습니다.',
-    declined: '이번 배달은 누군가 서명해야 한다고 약국이 요청했습니다. 다른 날 배달은 1, 다른 분이 받으시면 3으로 답장해 주세요.',
-    unknown: '죄송합니다. 이해하지 못했습니다. 1, 2, 3, 4 또는 5로 답장하시거나 {link} 를 누르세요',
-    closed: '이 배달은 이미 끝났습니다. 문의 사항은 약국에 전화해 주세요.'
+    eta: 'PHLO 배달: 기사님이 {min}분쯤 후 도착합니다 ({time}경). 댁에 안 계시나요? {link} 를 누르세요\n문자를 그만 받으시려면 STOP이라고 답장하세요.',
+    update: 'PHLO: 배달에 대한 새 소식이 있습니다. {link} 를 누르세요',
+    use_link: 'PHLO: 문자로는 답장을 받을 수 없습니다. {link} 를 누르세요',
+    closed: 'PHLO: 이 배달은 이미 끝났습니다.'
   },
   tl: {
-    eta: 'PHLO pharmacy delivery: ang inyong driver ay mga {min} minuto na lang ang layo (bandang {time}). Paki-antay sa bahay para matanggap ang inyong gamot.\n' +
-      'Wala sa bahay? Mag-reply:\n1 Ihatid sa ibang araw (ilagay ang araw at oras)\n2 Ayaw ko ng aking gamot\n3 Ibang tao ang tatanggap (ilagay ang pangalan at relasyon)\n4 Iwan sa harap ng pinto\n5 Iwan sa mailbox\n' +
-      'O i-tap ang {link}\nMag-reply ng STOP para itigil ang mga text.',
-    got_redeliver: 'Salamat. Sinabihan namin ang inyong botika na ihatid ulit: {detail}.',
-    got_redeliver_ask: 'Salamat. Anong araw at oras ang puwede? Mag-reply, halimbawa: 1 Biyernes pagkatapos ng 3pm. O i-tap ang {link}',
-    got_refuse: 'Salamat. Sinabihan namin ang inyong botika na ayaw ninyo ng delivery na ito. Tumawag sa inyong botika kung may tanong.',
-    got_someone: 'Salamat. Ibibigay ng driver ang inyong delivery kay: {detail}.',
-    got_someone_ask: 'Salamat. Sino ang tatanggap? Mag-reply, halimbawa: 3 Maria, anak. O i-tap ang {link}',
-    got_leave: 'Salamat. Kailangang aprubahan ng inyong botika na iwan ito nang walang pirma. Ite-text namin kayo kapag sumagot sila.',
-    approved_door: 'Inaprubahan ng inyong botika na iwan ang delivery sa harap ng pinto nang walang pirma. Kukuha ng litrato ang driver.',
-    approved_mailbox: 'Inaprubahan ng inyong botika na iwan ang delivery sa mailbox nang walang pirma. Kukuha ng litrato ang driver.',
-    declined: 'Kailangan ng inyong botika na may pumirma para sa delivery na ito. Mag-reply ng 1 para ihatid sa ibang araw, o 3 kung may ibang tao sa bahay.',
-    unknown: 'Paumanhin, hindi namin naintindihan. Mag-reply ng 1, 2, 3, 4 o 5, o i-tap ang {link}',
-    closed: 'Tapos na ang delivery na ito. Tumawag sa inyong botika kung may tanong.'
+    eta: 'PHLO delivery: ang inyong driver ay mga {min} minuto na lang ang layo (bandang {time}). Wala sa bahay? I-tap ang {link}\nMag-reply ng STOP para itigil ang mga text.',
+    update: 'PHLO: may update sa inyong delivery. I-tap ang {link}',
+    use_link: 'PHLO: hindi kami makakatanggap ng sagot sa text. Paki-tap ang {link}',
+    closed: 'PHLO: tapos na ang delivery na ito.'
   }
 };
+
+/** The text a driver gets: only the stop number. The details are in the PHLO app. */
+function phloDriverSms(seq, kind) {
+  return 'PHLO: ' + (kind === 'msg' ? 'new message for stop ' : 'update on stop ') + seq + '. Open the PHLO app.';
+}
+
+/** The text (and email) a pharmacy gets: no RX number or name. The details are on the pharmacy page. */
+function phloPharmacySms(pageUrl) {
+  return 'PHLO: a delivery needs your OK to leave it without a signature. Sign in to see it: ' + pageUrl + ' > Pharmacy sign-in.';
+}
 
 /* ---------------- the patient's reply page ---------------- */
 
@@ -303,19 +246,6 @@ function phloMinClock(m) {
 }
 
 function phloHhmmMin(t) { var p = String(t || '').split(':'); return p.length < 2 ? null : +p[0] * 60 + +p[1]; }
-
-/**
- * Reads a patient's text reply: "1 friday after 3" -> {choice: 'redeliver', detail: 'friday after 3'}.
- * Any reply starting with 1-5 counts (also full-width digits and 一 to 五); anything else is {choice: null, detail: text}.
- */
-function phloParseReply(text) {
-  var s = String(text || '').replace(/[０-９]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFF10 + 48); }).trim();
-  var cn = '一二三四五'.indexOf(s.charAt(0));
-  if (cn >= 0) s = String(cn + 1) + s.slice(1);
-  var m = s.match(/^#?\s*([1-5])(?![0-9])[\s.)\-:,，、。]*([\s\S]*)$/);
-  if (!m) return { choice: null, detail: s };
-  return { choice: PHLO_CHOICES[+m[1] - 1], detail: m[2].replace(/\s+/g, ' ').trim() };
-}
 
 /** Does a reply need more from the patient before it is useful (a day for redeliver, a name for someone else)? */
 function phloReplyNeedsDetail(choice, detail) {

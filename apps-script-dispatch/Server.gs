@@ -5,8 +5,8 @@
  *   - let drivers sign in with their username + PIN and see only their own route,
  *   - save what drivers record at each stop (outcome, photo, signature, copay),
  *   - let the PHLO Google account send routes and watch progress,
- *   - text patients when their driver is about 30 minutes away, read their replies (by text or on the
- *     reply page), and pass them to the driver, the office and the pharmacy,
+ *   - text patients when their driver is about 30 minutes away, read their answers on the reply page, and
+ *     pass them to the driver, the office and the pharmacy (texts carry no patient details: HIPAA),
  *   - let a pharmacy sign in to approve "leave it at the door" requests and ask a driver to bring a stop back,
  *   - let the office or a pharmacy message a driver.
  *
@@ -678,49 +678,42 @@ function driverMobile_(driverId) {
   return m;
 }
 
-/** Texts the driver of a stop (only on its delivery day, and only while the stop isn't recorded yet). */
-function textDriver_(date, stopId, body) {
+/**
+ * Texts the driver of a stop that something changed (only on its delivery day, and only while the stop isn't
+ * recorded yet). The text has only the stop number (HIPAA); the driver reads the details in the app.
+ */
+function textDriver_(date, stopId) {
   if (date !== today_()) return null;
   var f = findStop_(date, stopId);
   if (!f) return null;
   var updates = readJson_('updates-' + date + '.json') || {};
   if (updates[stopId]) return null;
   var to = driverMobile_(f.route.driverId);
-  return to ? sendSms_(to, 'PHLO stop ' + f.stop.seq + ' (' + f.stop.name + '): ' + body) : null;
+  return to ? sendSms_(to, phloDriverSms(f.stop.seq, 'update')) : null;
 }
 
 /**
- * A patient's answer (by text or on the reply page). parsed: {choice, detail}; via: 'sms' | 'page'.
- * Saves it, answers the patient by text (for texts), asks the pharmacy when it needs their OK, and tells the driver.
+ * A patient's answer on the reply page. parsed: {choice, detail}; via: 'page'.
+ * Saves it, asks the pharmacy when it needs their OK, and tells the driver (the details are in the app).
  */
 function reply_(date, texts, stopId, parsed, via, data) {
-  var t = texts.stops[stopId], link = pageUrl_() + '#t=' + t.token;
-  var choice = parsed.choice, detail = parsed.detail;
-  // Words sent after "1" or "3" alone: the day, or the person's name.
-  if (!choice && t.request && phloReplyNeedsDetail(t.request.choice, t.request.detail) && detail) choice = t.request.choice;
-  if (!choice) { if (via === 'sms') textPatient_(t, 'unknown', phloSms(t.lang, 'unknown', { link: link })); return; }
+  var t = texts.stops[stopId], choice = parsed.choice, detail = parsed.detail;
+  if (!choice) return;
   t.request = { choice: choice, detail: String(detail || '').slice(0, 300), data: data || null, at: new Date().toISOString(), via: via };
   t.approval = phloNeedsApproval(choice) ? { status: 'pending', at: t.request.at } : null;
-  if (via === 'sms') {
-    var key = phloReplyNeedsDetail(choice, detail) ? 'got_' + choice + '_ask' :
-      phloNeedsApproval(choice) ? 'got_leave' : 'got_' + choice;
-    textPatient_(t, 'reply', phloSms(t.lang, key, { detail: detail, link: link }));
-  }
   if (phloNeedsApproval(choice)) askPharmacy_(t, choice);
-  if (!phloReplyNeedsDetail(choice, detail)) textDriver_(date, stopId, 'patient says: ' + phloRequestText(t.request) + (phloNeedsApproval(choice) ? ' (waiting for the pharmacy\'s OK)' : ''));
+  if (!phloReplyNeedsDetail(choice, detail)) textDriver_(date, stopId);
 }
 
 /** Tells the pharmacy (text and/or email, as set on the Dispatch tab) that a patient wants it left without a signature. */
 function askPharmacy_(t, choice) {
   var p = settings_().pharmacies[String(t.store || '').toUpperCase()];
   if (!p) return;
-  var rx = (String(t.name).match(/\d{5,}/g) || []).join(', ');
-  var body = 'PHLO: a patient (RX ' + rx + ') asks to leave today\'s delivery ' + (choice === 'door' ? 'at the front door' : 'in the mailbox') +
-    ' without a signature. Approve or decline: ' + pageUrl_() + ' > Pharmacy sign-in.';
+  var body = phloPharmacySms(pageUrl_()); // no RX number or name (HIPAA): the details are on the pharmacy page
   var notes = [];
   if (p.phone) { var r = sendSms_(p.phone, body); notes.push('text ' + (r.ok ? 'sent' : 'not sent: ' + r.err)); }
   if (p.email) {
-    try { MailApp.sendEmail(p.email, 'PHLO: approval needed (RX ' + rx + ')', body); notes.push('email sent'); }
+    try { MailApp.sendEmail(p.email, 'PHLO: approval needed', body); notes.push('email sent'); }
     catch (e) { notes.push('email not sent: ' + e.message); }
   }
   t.approval.asked = notes.join('; ');
@@ -735,12 +728,11 @@ function approve_(date, stopId, ok, by, position, via) {
     var texts = readTexts_(date), t = texts.stops[stopId];
     if (!t || !t.request || !phloNeedsApproval(t.request.choice)) throw new Error('This patient has not asked to leave it without a signature.');
     t.approval = { status: ok ? 'approved' : 'declined', by: by, position: position, at: new Date().toISOString(), via: via };
-    if (t.phone) textPatient_(t, 'approval', phloSms(t.lang, ok ? 'approved_' + t.request.choice : 'declined'));
+    if (t.phone) textPatient_(t, 'approval', phloSms(t.lang, 'update', { link: pageUrl_() + '#t=' + t.token }));
     writeJson_('texts-' + date + '.json', texts);
     out = t;
   });
-  textDriver_(date, stopId, ok ? 'pharmacy OK\'d leaving it ' + (out.request.choice === 'door' ? 'at the front door' : 'in the mailbox') +
-    ' with no signature (approved by ' + by + ', ' + position + '). Take a photo.' : 'the pharmacy said someone must sign for it.');
+  textDriver_(date, stopId);
   return out;
 }
 
@@ -755,7 +747,7 @@ function messageDriver_(date, stopId, reason, other, from) {
   var msg = { id: Utilities.getUuid().slice(0, 8), driverId: f.route.driverId, stopId: stopId, seq: f.stop.seq,
     text: phloRtsText(rx, name, reason, String(other || '').slice(0, 200)), from: from, at: new Date().toISOString(), readAt: '' };
   var to = driverMobile_(f.route.driverId);
-  var r = to ? sendSms_(to, 'PHLO: ' + msg.text + ' (from ' + from + '). Stop ' + f.stop.seq + '.') : { ok: false, err: 'No mobile number for this driver.' };
+  var r = to ? sendSms_(to, phloDriverSms(f.stop.seq, 'msg')) : { ok: false, err: 'No mobile number for this driver.' };
   msg.texted = r.ok; msg.err = r.ok ? '' : r.err;
   withLock_(function () {
     var texts = readTexts_(date);
@@ -806,8 +798,9 @@ function rxOwns_(s, date, stopId) {
 }
 
 /**
- * A text from a patient (Quo posts a message.received event here). Each message is handled once: Quo
- * resends an event it thinks failed, so the message id is remembered. Anything we say goes out by sendSms_.
+ * A text from a patient (Quo posts a message.received event here). Patients answer on the reply page, not by
+ * text (HIPAA: Quo's BAA does not cover texts), so a text only turns STOP/START on or off; anything else gets
+ * the link back. Each message is handled once: Quo resends an event it thinks failed, so the message id is remembered.
  */
 function quoIn_(e, ev) {
   var p = (e && e.parameter) || {}, done = out_({ ok: true });
@@ -834,13 +827,12 @@ function quoIn_(e, ev) {
       var fresh = readTexts_(date), t = fresh.stops[id];
       if (msgId && (t.log || []).some(function (l) { return l.id === msgId; })) return;
       t.log = (t.log || []).concat([{ dir: 'in', text: body, at: new Date().toISOString(), id: msgId || undefined }]).slice(-30);
-      var parsed = phloParseReply(body);
       if (/^\s*(STOP|STOPALL|UNSUBSCRIBE|CANCEL|END|QUIT|START|UNSTOP|HELP|INFO)\s*$/i.test(body)) {
         t.optOut = /^\s*(STOP|STOPALL|UNSUBSCRIBE|CANCEL|END|QUIT)\s*$/i.test(body);
       } else {
         var updates = readJson_('updates-' + date + '.json') || {};
         if (updates[id] || date < today) textPatient_(t, 'closed', phloSms(t.lang, 'closed'));
-        else reply_(date, fresh, id, parsed, 'sms', null);
+        else textPatient_(t, 'use_link', phloSms(t.lang, 'use_link', { link: pageUrl_() + '#t=' + t.token }));
       }
       writeJson_('texts-' + date + '.json', fresh);
     });

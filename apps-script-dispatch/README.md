@@ -50,7 +50,7 @@ PHLO texts through [Quo](https://www.quo.com) (formerly OpenPhone).
    your PHLO number, and save. Fill in each pharmacy's mobile and/or email and sign-in PIN and **Save**
    (saving also starts the 5-minute timer that sends the texts).
 7. Try it: put your own mobile on a stop, send routes, and click **Text now** on that stop under Deliveries.
-   Then text "4" back from your phone and check that the stop shows your reply.
+   Then text anything back from your phone: you should get the reply-page link back. Tap it and answer.
 
 Moving from Twilio: the old `TWILIO_*` script properties are no longer used; you can delete them. Turn off
 the "A message comes in" webhook on the Twilio number (or release the number) once Quo works.
@@ -58,7 +58,9 @@ the "A message comes in" webhook on the Twilio number (or release the number) on
 Each reply from a patient is handled once, even if Quo sends it again (Quo resends when it is not sure the
 script got it).
 
-**HIPAA:** texts say only that a pharmacy delivery is on the way (no names or medications). Quo signs a
+**HIPAA:** no text has patient details: not "pharmacy" or "medication", no name, RX number, address or
+answer. Patients answer on the reply page, drivers and pharmacies read the details after signing in, and a
+text back from a patient only gets the link again (STOP still works). Quo signs a
 BAA only on the Business and Scale plans, and its BAA says text messaging (SMS/MMS) is **not** a covered
 service. Quo allows texting patients only if you get each patient's OK to be texted, keep health
 information in texts to the minimum, and write that decision and its risks into your HIPAA policies; you
