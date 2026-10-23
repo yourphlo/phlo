@@ -35,7 +35,6 @@ function doPost(e) {
   if (e && e.parameter && e.parameter.MessageSid) return twilioIn_(e);
   var req;
   try { req = JSON.parse(e.postData.contents); } catch (err) { return out_({ ok: false, error: 'Bad request.' }); }
-  WHO = '';
   try {
     var fn = ACTIONS[req.action];
     if (!fn) throw new Error('Unknown action.');
@@ -535,6 +534,7 @@ function audit_(req, ok, err) {
       else folder.createFile(name, JSON.stringify(list), 'application/json');
     });
   } catch (e) { /* the log must never stop the app */ }
+  WHO = '';
 }
 
 /** Checks the Google sign-in token the PHLO page sends and that it belongs to an admin account. */
