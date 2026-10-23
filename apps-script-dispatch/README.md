@@ -59,8 +59,10 @@ Each reply from a patient is handled once, even if Quo sends it again (Quo resen
 script got it).
 
 **HIPAA:** texts say only that a pharmacy delivery is on the way (no names or medications). Quo signs a
-BAA only on the Business and Scale plans, and its BAA leaves out "third-party integrations or connected
-services", so ask Quo whether texts sent through the API are covered. A free gmail.com account has no BAA
+BAA only on the Business and Scale plans, and its BAA says text messaging (SMS/MMS) is **not** a covered
+service. Quo allows texting patients only if you get each patient's OK to be texted, keep health
+information in texts to the minimum, and write that decision and its risks into your HIPAA policies; you
+carry the responsibility for what the texts say. A free gmail.com account has no BAA
 with Google. Check with your compliance person before using it with patients.
 
 ## Updating
