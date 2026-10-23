@@ -302,6 +302,35 @@ eq([ctx.phloCheckUpdate({ status: 'delivered', methods: ['door'] }).length, ctx.
   srv.post({ action: 'admin.syncDrivers', googleToken: 'good', drivers: [{ id: 'b', name: 'Bo', username: 'bo', salt: 's2', hash: sha('s2', '1111') }] });
   eq(srv.post({ action: 'driver.route', session: login.session }).error, 'Please sign in again.', 'server: removed driver is signed out');
   eq(srv.post('not json').error, 'Bad request.', 'server: bad request');
+
+  // Changes keep the earlier record.
+  const bo = srv.post({ action: 'driver.login', username: 'bo', pin: '1111' });
+  delete srv.cache.fails_bo; delete srv.cache.fails_bo_long;
+  const boS = srv.post({ action: 'driver.login', username: 'bo', pin: '1111' }).session;
+  eq(bo.error, 'Too many wrong tries. Wait 15 minutes and try again.', 'server: still locked');
+  srv.post({ action: 'driver.update', session: boS, date: '2026-10-22', stopId: 'rx3', update: { status: 'failed', note: 'not home' } });
+  const again = srv.post({ action: 'driver.update', session: boS, date: '2026-10-22', stopId: 'rx3', update: { status: 'delivered' } }).update;
+  eq([again.status, again.history.length, again.history[0].status, again.history[0].note], ['delivered', 1, 'failed', 'not home'], 'server: a change keeps the earlier record');
+
+  // Drivers only open today, coming days and yesterday.
+  eq(srv.post({ action: 'driver.route', session: boS, date: '2026-10-01' }).error, 'That route is closed. Ask the PHLO office if you need it.', 'server: old routes closed to drivers');
+  eq(srv.post({ action: 'driver.update', session: boS, date: '2026-10-01', stopId: 'rx3', update: { status: 'delivered' } }).error,
+    'That route is closed. Ask the PHLO office if you need it.', 'server: old routes cannot be changed by drivers');
+
+  // 20 wrong PINs in a few hours lock the sign-in for hours.
+  for (let i = 0; i < 20; i++) { srv.post({ action: 'driver.login', username: 'zed', pin: '1' }); delete srv.cache.fails_zed; }
+  eq(srv.post({ action: 'driver.login', username: 'zed', pin: '1' }).error, 'Too many wrong tries. This sign-in is locked for a few hours; ask the PHLO office.', 'server: long lockout');
+
+  // Access log: who did what, without patient details; repeated views logged once an hour.
+  srv.post({ action: 'driver.route', session: boS }); srv.post({ action: 'driver.route', session: boS });
+  const logFile = Object.values(srv.files).find(f => /^access-\d{4}-\d{2}-\d{2}\.json$/.test(f.name));
+  const log = JSON.parse(logFile.content);
+  const has = (who, action, ok) => log.some(e => e.who === who && e.action === action && e.ok === ok);
+  eq([has('driver sign-in as "ana"', 'driver.login', false), has('driver Ana Ruiz (a)', 'driver.login', true) || has('driver sign-in as "ana"', 'driver.login', true),
+    has('office someone@gmail.com', 'admin.syncDrivers', false), has('office yourphlo@gmail.com', 'admin.publish', true),
+    log.some(e => e.who === 'driver Bo (b)' && e.action === 'driver.update' && e.stop === 'rx3')], [true, true, true, true, true], 'server: access log entries');
+  eq(log.filter(e => e.who === 'driver Bo (b)' && e.action === 'driver.route' && e.ok).length, 1, 'server: repeated views logged once');
+  eq(/DOE|1 A St/.test(logFile.content), false, 'server: no patient names or addresses in the access log');
 }
 
 eq(ctx.phloCheckUpdate({ status: 'delivered', methods: ['door'] }, { leaveApproved: true }).length, 1, 'pharmacy-approved drop-off needs a photo');
@@ -354,9 +383,9 @@ ctx.PHLO_LANGS.forEach(l => {
     { id: 'a', name: 'Ana Ruiz', username: 'ana', salt: 's1', hash: sha('s1', '4321'), mobile: '626-555-0001' },
     { id: 'b', name: 'Bo', username: 'bo', salt: 's2', hash: sha('s2', '1111') }] });
   const set = srv.post({ action: 'admin.textSettings', googleToken: 'good', set: { leadMin: 30, pharmacies: {
-    VALLEY: { phone: '626 555 0300', email: 'rx@example.com', pin: '2468' }, LV: { pin: '12' } } } });
-  eq(set.error, 'A pharmacy PIN must be 4 to 8 digits (LV).', 'texting: bad pharmacy PIN refused');
-  const settings = srv.post({ action: 'admin.textSettings', googleToken: 'good', set: { leadMin: 30, pharmacies: { VALLEY: { phone: '626 555 0300', email: 'rx@example.com', pin: '2468' } } } });
+    VALLEY: { phone: '626 555 0300', email: 'rx@example.com', pin: '246810' }, LV: { pin: '2468' } } } });
+  eq(set.error, 'A pharmacy PIN must be 6 to 8 digits (LV).', 'texting: bad pharmacy PIN refused');
+  const settings = srv.post({ action: 'admin.textSettings', googleToken: 'good', set: { leadMin: 30, pharmacies: { VALLEY: { phone: '626 555 0300', email: 'rx@example.com', pin: '246810' } } } });
   eq([settings.ready, settings.from, settings.pharmacies.VALLEY, /\/exec\?key=\w{32}$/.test(settings.hookUrl), srv.triggers],
     [true, '(626) 555-0000', { phone: '+16265550300', email: 'rx@example.com', hasPin: true }, true, ['textingTick']], 'texting: settings + 5-minute timer');
   const hookKey = settings.hookUrl.split('key=')[1];
@@ -391,13 +420,14 @@ ctx.PHLO_LANGS.forEach(l => {
   eq(srv.sms[0].body.indexOf('Gracias. Su farmacia debe aprobar'), 0, 'texting: answer in Spanish');
   eq(srv.sms[1].body.indexOf('RX 1000001') > 0 && srv.sms[1].body.indexOf('DOE') < 0, true, 'texting: pharmacy text has the RX number, not the name');
   eq([srv.mail.length, srv.mail[0].to], [1, 'rx@example.com'], 'texting: pharmacy emailed');
+  eq(/1000001|DOE/.test(srv.mail[0].subject + srv.mail[0].body), false, 'texting: pharmacy email has no RX number or name');
   eq(srv.sms[2].body, 'PHLO stop 1 (1000001,DOE,JANE): patient says: Leave at front door, no signature (waiting for the pharmacy\'s OK)', 'texting: driver text');
   let dr = srv.post({ action: 'driver.route', session: ana });
   eq([dr.texts.rx1000001.request.choice, dr.texts.rx1000001.approval.status], ['door', 'pending'], 'texting: driver app shows the request');
 
   // The pharmacy signs in and approves; patient and driver are told.
   eq(srv.post({ action: 'rx.login', store: 'valley', pin: '0000' }).error, 'Wrong pharmacy or PIN.', 'texting: pharmacy wrong PIN');
-  const rx = srv.post({ action: 'rx.login', store: 'valley', pin: '2468' }).session;
+  const rx = srv.post({ action: 'rx.login', store: 'valley', pin: '246810' }).session;
   eq(srv.post({ action: 'driver.route', session: rx }).error, 'Please sign in again.', 'texting: pharmacy session is not a driver');
   const day = srv.post({ action: 'rx.day', session: rx, date: '2026-10-22' });
   eq(day.stops.map(s => s.id), ['rx1000001', 'rx1000002', 'rx1000003'], 'texting: pharmacy sees only its own stops');

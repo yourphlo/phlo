@@ -983,7 +983,7 @@
     codes.forEach(function (c) {
       var p = r.pharmacies[c] || {};
       var input = function (name, type, value, ph) { return el('input', { name: name, type: type, value: value || '', placeholder: ph, autocomplete: 'off', 'aria-label': ph + ' for ' + c }); };
-      var pin = input('pin', 'text', '', p.hasPin ? 'New PIN (has one)' : 'PIN, 4-8 digits');
+      var pin = input('pin', 'text', '', p.hasPin ? 'New PIN (has one)' : 'PIN, 6-8 digits');
       pin.setAttribute('inputmode', 'numeric');
       var clear = el('label', { class: 'small muted' }, [el('input', { type: 'checkbox', name: 'clearPin' }), ' remove PIN']);
       tb.appendChild(el('tr', { 'data-code': c }, [
@@ -1002,7 +1002,7 @@
       var f = function (n) { var i = tr.querySelector('[name="' + n + '"]'); return i ? (i.type === 'checkbox' ? i.checked : i.value.trim()) : ''; };
       var c = tr.getAttribute('data-code');
       if (f('phone') && !phloE164(f('phone'))) bad.push(c + ': the mobile number does not look right');
-      if (f('pin') && !/^\d{4,8}$/.test(f('pin'))) bad.push(c + ': the PIN must be 4 to 8 digits');
+      if (f('pin') && !/^\d{6,8}$/.test(f('pin'))) bad.push(c + ': the PIN must be 6 to 8 digits');
       if (f('phone') || f('email') || f('pin') || tr.querySelector('[name="clearPin"]') && !f('clearPin')) {
         pharmacies[c] = { phone: f('phone'), email: f('email'), pin: f('pin'), clearPin: f('clearPin') };
       }

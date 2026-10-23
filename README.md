@@ -75,8 +75,8 @@ your Google Drive), so they show up on any computer once you sign in with the sa
 Signed out, they are kept in that browser only and uploaded the next time you sign in.
 
 **App username and App PIN** (in the driver form): what the driver types to sign in to the driver
-app. The username is the first name unless you type another one; the PIN is 4 to 6 digits (6 is
-safer). The PIN is stored only scrambled, so it can't be shown again: type a new one to change it.
+app. The username is the first name unless you type another one; the PIN is 6 digits (older 4-digit
+PINs keep working until you change them). The PIN is stored only scrambled, so it can't be shown again: type a new one to change it.
 
 ### Dispatch
 
@@ -163,7 +163,9 @@ PIN you set under **Dispatch > Texting settings** (where you also put the mobile
 gets "approval needed" messages). They see only their own deliveries for a day: driver, arrival time,
 outcome, the drop-off photo and signature, and what the patient answered. They can **Approve / decline**
 leave-at-the-door requests and **Return to pharmacy** a stop (the driver gets the message in the app and by
-text).
+text). Pharmacy PINs are 6 to 8 digits, and the page signs out after 30 minutes without use (pharmacy
+computers are shared). The "approval needed" email has no RX number; the pharmacy sees which patient after
+signing in.
 
 ### Driver app
 
@@ -180,8 +182,9 @@ Messages from the office or a pharmacy ("Please RTS to RX ...") show at the top 
 and each stop shows what the patient answered by text (and the pharmacy's OK). Give drivers a mobile number
 on the Drivers tab to also get these as texts. Tapping **Navigate** starts the patients' "on the way" texts.
 
-They stay signed in on that phone for 16 hours. Five wrong PINs lock that username for 15 minutes.
-Removing a driver or their PIN signs them out.
+They stay signed in on that phone for 16 hours. Five wrong PINs lock that username for 15 minutes, and 20
+wrong PINs within 6 hours lock it for 6 hours. Removing a driver or their PIN signs them out. Drivers can open
+only today's route, coming ones and yesterday's; older routes stay with the office.
 
 ### Patient data
 
@@ -191,7 +194,10 @@ addresses go there too, for suggestions).
 
 Routes you send, and what drivers record (photos and signatures included), are saved in the
 **PHLO Dispatch** folder of the yourphlo Google Drive by the dispatch server (below), and stay there
-until you delete them. A free gmail.com account comes without a HIPAA agreement with Google
+until you delete them. When a driver changes a stop they already recorded, the earlier record is kept
+with it. The **access-log** folder there has one file a day of who signed in (and wrong PINs), who
+changed what, and who looked at which day's deliveries (no patient names or addresses, just the stop).
+Keep those files: HIPAA expects records like these to be kept for 6 years. A free gmail.com account comes without a HIPAA agreement with Google
 (a BAA); a Google Workspace account can have one.
 
 Otherwise patient data is never saved in the browser or kept between visits. **Sign out** clears the page.
