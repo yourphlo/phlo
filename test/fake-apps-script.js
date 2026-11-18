@@ -11,7 +11,7 @@ const crypto = require('crypto');
 
 module.exports = function makeServer(opts) {
   opts = opts || {};
-  const props = {}, cache = {};
+  const props = {}, cache = {}, google = [];
   let nextId = 1;
   const files = {};   // id -> {name, parent, content (string|Buffer), type}
   const folders = {}; // id -> {name, parent}
@@ -47,6 +47,7 @@ module.exports = function makeServer(opts) {
     ContentService: { MimeType: { JSON: 'json', XML: 'xml' }, createTextOutput: t => ({ setMimeType: () => ({ text: t }) }) },
     ScriptApp: {
       getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/fake/exec' }),
+      getOAuthToken: () => 'script-token',
       getProjectTriggers: () => triggers.map(h => ({ getHandlerFunction: () => h })),
       newTrigger: h => ({ timeBased: () => ({ everyMinutes: () => ({ create: () => triggers.push(h) }) }) })
     },
@@ -77,6 +78,13 @@ module.exports = function makeServer(opts) {
           getContentText: () => JSON.stringify(stopped ? { code: 21610, message: 'Attempt to send to unsubscribed recipient' } : { sid: 'SM' + sms.length }) };
       }
       const tok = (o.headers.Authorization || '').replace('Bearer ', '');
+      if (tok === 'script-token') {   // the script's own Google access (owner password sign-in relays through it)
+        google.push({ url, method: o.method || 'get', payload: o.payload });
+        const json = v => ({ getResponseCode: () => 200, getContentText: () => JSON.stringify(v), getContent: () => [...Buffer.from(JSON.stringify(v))] });
+        if (/\/upload\//.test(url)) return json({ id: 'drv1' });
+        if (/sheets\.googleapis/.test(url)) return { getResponseCode: () => 404, getContentText: () => '{"error":{"message":"not found"}}' };
+        return json({ files: [] });
+      }
       const email = (opts.adminTokens || {})[tok];
       return { getResponseCode: () => (email ? 200 : 401), getContentText: () => JSON.stringify({ user: { emailAddress: email } }) };
     } },
@@ -96,6 +104,6 @@ module.exports = function makeServer(opts) {
     run: name => ctx[name](),
     setNow: iso => { now = Date.parse(iso + 'Z'); },
     clearTickCache: () => { delete cache.tick; },
-    files, props, cache, sms, mail, triggers
+    files, props, cache, sms, mail, triggers, google
   };
 };

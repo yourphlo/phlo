@@ -6,6 +6,9 @@ window.PHLO_CONFIG = {
   timeZone: 'America/Los_Angeles',
   // The only Google accounts allowed to use the app. Everyone else is signed straight back out.
   allowedEmails: ['yourphlo@gmail.com'],
+  // How the owner signs in: 'password' (the long ADMIN_PASSWORD set in the dispatch script, see
+  // apps-script-dispatch/README.md) or 'google' (Google sign-in with the account above).
+  ownerLogin: 'password',
   // Google Maps API key for address suggestions on driver profiles (README > "Google Maps addresses").
   // Safe to publish once the key is limited to your website. Leave empty to type addresses by hand.
   mapsApiKey: 'AIzaSyAgKKj2E5yMTIntVmX6ZZttIBq770rx47M',

@@ -67,8 +67,14 @@ const PASTE = [
 let routesCalls = 0, failures = 0;
 const check = (ok, msg) => { if (!ok) { failures++; console.log('FAIL', msg); } else console.log('ok  ', msg); };
 
-async function setup(page, errors) {
+async function setup(page, errors, ownerLogin) {
   page.on('pageerror', e => errors.push(e.message));
+  // The office signs in with Google unless the test asks for the owner password.
+  await page.route(/\/config\.js$/, async r => {
+    const body = String(fs.readFileSync(path.join(root, 'web', 'config.js'))).replace(/dispatchUrl: '[^']*'/, `dispatchUrl: '${DISPATCH}'`)
+      .replace(/ownerLogin: '[^']*'/, `ownerLogin: '${ownerLogin || 'google'}'`);
+    r.fulfill({ contentType: 'text/javascript', body });
+  });
   page.on('dialog', d => d.accept());
   await page.route(/fonts\./, r => r.abort());
   await page.route(/cdnjs.*xlsx/, r => r.fulfill({ contentType: 'text/javascript', body: 'window.XLSX={utils:{}}' }));
@@ -100,11 +106,41 @@ async function setup(page, errors) {
   /* ---- office ---- */
   const errors = [];
   const office = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
-  await setup(office, errors);
+  // The owner password (Script property ADMIN_PASSWORD), checked by the server.
+  const PW = 'correct horse battery staple 42';
+  check(!server.post({ action: 'admin.login', password: PW }).ok, 'owner password: refused until it is set up');
+  server.props.ADMIN_PASSWORD = PW;
+  check(/Wrong password/.test(server.post({ action: 'admin.login', password: 'nope' }).error), 'owner password: wrong one refused');
+  const adm = server.post({ action: 'admin.login', password: PW });
+  check(adm.ok && adm.session && adm.email === 'yourphlo@gmail.com', 'owner password: signs in');
+  check(!server.post({ action: 'admin.google', googleToken: 'pw:' + adm.session, url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages' }).ok,
+    'owner password: relay only reaches Drive/Sheets');
+  check(!server.post({ action: 'admin.google', googleToken: 'pw:' + adm.session, method: 'post', url: 'https://www.googleapis.com/drive/v3/files/x?a=1' }).ok,
+    'owner password: relay only writes through the upload endpoint');
+  check(!server.post({ action: 'admin.google', googleToken: 'pw:nope', url: 'https://www.googleapis.com/drive/v3/files?q=x' }).ok, 'owner password: relay needs a session');
+  check(!server.post({ action: 'driver.route', session: adm.session }).ok, 'owner password: not a driver session');
+  server.post({ action: 'admin.logout', googleToken: 'pw:' + adm.session });
+  check(!server.post({ action: 'admin.status', googleToken: 'pw:' + adm.session, date: '2026-10-22' }).ok, 'owner password: sign out ends it');
+  delete server.cache.fails_admin;
+
+  await setup(office, errors, 'password');
   await office.addInitScript(d => { if (!localStorage.getItem('phlo.drivers')) localStorage.setItem('phlo.drivers', d); }, JSON.stringify(DRIVERS));
   await office.goto(base);
-  await office.click('#signin-main');
+  check(await office.isHidden('#signin-main'), 'owner password: no Google button');
+  await office.fill('#owner-login [name="password"]', 'wrong');
+  await office.click('#owner-login button[type="submit"]');
+  await office.waitForSelector('#signin-error:not([hidden])');
+  check(/Wrong password/.test(await office.textContent('#signin-error')), 'owner password: page shows a wrong password');
+  await office.fill('#owner-login [name="password"]', PW);
+  await office.click('#owner-login button[type="submit"]');
   await office.waitForSelector('#tabs:not([hidden])');
+  check((await office.textContent('#who')) === 'yourphlo@gmail.com', 'owner password: signed in as the PHLO account');
+  await office.waitForFunction(() => /Saved to your Google account/.test(document.body.textContent));
+  check(server.google.some(g => /appDataFolder/.test(g.url)) && server.google.some(g => /\/upload\//.test(g.url)),
+    'owner password: drivers file read and saved through the script');
+  await office.reload();
+  await office.waitForSelector('#tabs:not([hidden])');
+  check(true, 'owner password: still signed in after reloading the tab');
   await office.fill('#date', '2026-10-22');
   await office.fill('.paste-text', PASTE);
   await office.click('#build');

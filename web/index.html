@@ -46,6 +46,13 @@
       <h2>Sign in to use PHLO</h2>
       <p class="muted">Admin sign-in is for the PHLO office account only. Drivers sign in below with their name and PIN.</p>
       <button id="signin-main" class="btn primary">Admin sign-in</button>
+      <form id="owner-login" class="owner-login" hidden novalidate>
+        <input name="username" value="PHLO owner" autocomplete="username" hidden>
+        <label class="field">Owner password
+          <input name="password" type="password" autocomplete="current-password" spellcheck="false" required>
+        </label>
+        <button type="submit" class="btn primary">Admin sign-in</button>
+      </form>
       <p id="signin-error" class="status error" role="alert" hidden></p>
       <form id="driver-login" class="driver-login" hidden novalidate>
         <h3>Drivers</h3>
