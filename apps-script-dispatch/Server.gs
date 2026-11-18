@@ -233,7 +233,7 @@ var ACTIONS = {
     admin_(req);
     var url = String(req.url || ''), method = String(req.method || 'get').toLowerCase();
     var ok = /^https:\/\/sheets\.googleapis\.com\/v4\/spreadsheets\/[\w-]+(\?|\/values:batchGet\?)/.test(url) ||
-      /^https:\/\/www\.googleapis\.com\/drive\/v3\/files(\?|\/[\w-]+\?)/.test(url) ||
+      /^https:\/\/www\.googleapis\.com\/drive\/v3\/files(\?|\/[\w-]+\?|\/[\w-]+\/export\?)/.test(url) ||
       /^https:\/\/www\.googleapis\.com\/upload\/drive\/v3\/files(\?|\/[\w-]+\?)/.test(url);
     if (!ok || ['get', 'post', 'patch'].indexOf(method) < 0 || (method !== 'get' && url.indexOf('/upload/') < 0)) {
       throw new Error('That Google request is not allowed.');
