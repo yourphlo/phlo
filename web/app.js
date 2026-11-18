@@ -157,6 +157,9 @@
     $('signin-main').hidden = true;
     var f = $('owner-login');
     f.hidden = false;
+    f.elements.show.addEventListener('change', function () {
+      f.elements.password.type = f.elements.show.checked ? 'text' : 'password';
+    });
     f.addEventListener('submit', function (e) {
       e.preventDefault();
       var pw = f.elements.password.value;
@@ -165,6 +168,7 @@
       btn.disabled = true; signInError('');
       phloBackend.call('admin.login', { password: pw }).then(function (r) {
         f.elements.password.value = '';
+        f.elements.show.checked = false; f.elements.password.type = 'password';
         try { sessionStorage.setItem(OWNER_KEY, JSON.stringify({ session: r.session, expires: r.expires, email: r.email })); } catch (err) { /* storage blocked */ }
         usePasswordSession(r);
       }, function (err) { signInError(err.message); }).then(function () { btn.disabled = false; });
