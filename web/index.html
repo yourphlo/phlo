@@ -49,8 +49,9 @@
       <form id="owner-login" class="owner-login" hidden novalidate>
         <input name="username" value="PHLO owner" autocomplete="username" hidden>
         <label class="field">Owner password
-          <input name="password" type="password" autocomplete="current-password" spellcheck="false" required>
+          <input name="password" type="password" autocomplete="current-password" spellcheck="false" autocapitalize="none" autocorrect="off" required>
         </label>
+        <label class="show-pw"><input type="checkbox" name="show"> Show password</label>
         <button type="submit" class="btn primary">Admin sign-in</button>
       </form>
       <p id="signin-error" class="status error" role="alert" hidden></p>

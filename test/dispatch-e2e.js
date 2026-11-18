@@ -127,6 +127,10 @@ async function setup(page, errors, ownerLogin) {
   await office.addInitScript(d => { if (!localStorage.getItem('phlo.drivers')) localStorage.setItem('phlo.drivers', d); }, JSON.stringify(DRIVERS));
   await office.goto(base);
   check(await office.isHidden('#signin-main'), 'owner password: no Google button');
+  await office.check('#owner-login [name="show"]');
+  check(await office.getAttribute('#owner-login [name="password"]', 'type') === 'text', 'owner password: Show password shows it');
+  await office.uncheck('#owner-login [name="show"]');
+  check(await office.getAttribute('#owner-login [name="password"]', 'type') === 'password', 'owner password: unticking hides it again');
   await office.fill('#owner-login [name="password"]', 'wrong');
   await office.click('#owner-login button[type="submit"]');
   await office.waitForSelector('#signin-error:not([hidden])');
