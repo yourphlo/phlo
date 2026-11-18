@@ -57,6 +57,8 @@ person before using it with patients.
 With `ownerLogin: 'password'` in `web/config.js` (the default for now), the office signs in to the page
 with a long password instead of Google. This script then reads the store sheets and keeps the drivers
 file as **yourphlo@gmail.com**, so those sheets must be shared with that account.
+Google Sheets are downloaded through Google Drive as .xlsx and read in the page, so the script doesn't
+need the Sheets API (its Google Cloud project is a hidden one you can't turn APIs on in).
 
 1. Make up a long password: at least 20 characters, e.g. five or six random words. Keep it in a password
    manager.

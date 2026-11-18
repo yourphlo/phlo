@@ -296,20 +296,42 @@
     });
   }
 
+  /** Which tabs of a Google Sheet to read, plus the pickup banner to put above each day tab. */
+  function sheetTabs(names, store, delivery) {
+    var tabs, banners = {};
+    if (store.tabPerDay) {
+      tabs = names.filter(function (n) {
+        var d = phloParseDate(n, delivery, true);
+        if (!d || d > delivery || d < phloAddDays(delivery, -7)) return false;
+        banners[n] = 'PHLO PICK UP ON ' + phloFmt(d, 'MM/dd/yyyy');
+        return true;
+      });
+    } else {
+      tabs = phloPickTabs(names, delivery, store.tab || {});
+    }
+    return { tabs: tabs, banners: banners };
+  }
+
+  // With the owner password, the dispatch script can't use the Sheets API (its Google Cloud project is
+  // Google's hidden one), so it downloads the Google Sheet from Drive as .xlsx and the page reads that.
+  function readExportedSheet(id, store, delivery) {
+    var XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    return api(DRIVE + '/' + id + '/export?mimeType=' + encodeURIComponent(XLSX_TYPE), true).then(function (buf) {
+      var wb = XLSX.read(buf, { type: 'array' });
+      var pick = sheetTabs(wb.SheetNames, store, delivery), values = [];
+      pick.tabs.forEach(function (t) {
+        if (pick.banners[t]) values.push([pick.banners[t]]);
+        values = values.concat(XLSX.utils.sheet_to_json(wb.Sheets[t], { header: 1, raw: false, defval: '' }));
+      });
+      return { values: values, tabs: pick.tabs, note: pick.tabs.length ? '' : 'no tab for this month' };
+    });
+  }
+
   function readGoogleSheet(id, store, delivery) {
+    if (PASSWORD) return readExportedSheet(id, store, delivery);
     return api(SHEETS + id + '?fields=sheets.properties.title').then(function (meta) {
       var names = meta.sheets.map(function (s) { return s.properties.title; });
-      var tabs, banners = {};
-      if (store.tabPerDay) {
-        tabs = names.filter(function (n) {
-          var d = phloParseDate(n, delivery, true);
-          if (!d || d > delivery || d < phloAddDays(delivery, -7)) return false;
-          banners[n] = 'PHLO PICK UP ON ' + phloFmt(d, 'MM/dd/yyyy');
-          return true;
-        });
-      } else {
-        tabs = phloPickTabs(names, delivery, store.tab || {});
-      }
+      var pick = sheetTabs(names, store, delivery), tabs = pick.tabs, banners = pick.banners;
       if (!tabs.length) return { values: [], tabs: [], note: 'no tab for this month' };
       var url = SHEETS + id + '/values:batchGet?valueRenderOption=FORMATTED_VALUE&' +
         tabs.map(function (t) { return 'ranges=' + encodeURIComponent(quoteTab(t)); }).join('&');
