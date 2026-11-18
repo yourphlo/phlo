@@ -72,7 +72,14 @@
       client_id: id,
       scope: SCOPES,
       callback: function (resp) {
-        if (resp.error) { toast('Sign-in failed: ' + resp.error); return; }
+        if (resp.error) { signInError('Google sign-in did not finish (' + resp.error + '). Try again.'); return; }
+        var o2 = google.accounts.oauth2;
+        if (o2.hasGrantedAllScopes && !o2.hasGrantedAllScopes.apply(o2, [resp].concat(SCOPES.split(' ')))) {
+          if (o2.revoke) o2.revoke(resp.access_token, function () {});
+          signInError('Google signed you in, but not every permission box was ticked. Click Admin sign-in again and, ' +
+            'on Google\'s permission screen, tick ALL the boxes (or "Select all") before Continue.');
+          return;
+        }
         state.token = resp.access_token;
         state.tokenExpires = Date.now() + (resp.expires_in - 60) * 1000;
         checkAccount().then(function (email) {
@@ -90,6 +97,7 @@
       return;
     }
     state.onToken = then || null;
+    signInError('');
     state.tokenClient.requestAccessToken({ prompt: state.token ? '' : 'consent' });
   }
 
@@ -98,10 +106,22 @@
   /** Resolves with the signed-in account's email if it is allowed to use the app, else rejects with it. */
   function checkAccount() {
     return fetch('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)', { headers: { Authorization: 'Bearer ' + state.token } })
-      .then(function (res) { return res.ok ? res.json() : {}; })
+      .then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (r) {
+          if (!res.ok) {
+            var msg = String(r.error && r.error.message || ('HTTP ' + res.status));
+            var err = new Error(/has not been used|is disabled|SERVICE_DISABLED/i.test(msg) ?
+              'The Google Drive API is turned off in the Google Cloud project. Open console.cloud.google.com > ' +
+              'APIs & Services > Library, enable "Google Drive API" and "Google Sheets API", wait 2 minutes, then sign in again.' :
+              'Google refused to say which account signed in (' + msg + '). Try Admin sign-in again.');
+            err.problem = true; throw err;
+          }
+          return r;
+        });
+      })
       .then(function (r) {
         var email = String(r.user && r.user.emailAddress || '').toLowerCase();
-        if (!email) throw new Error('');
+        if (!email) { var e = new Error('Could not check which Google account signed in. Try again.'); e.problem = true; throw e; }
         if (ALLOWED.length && ALLOWED.indexOf(email) < 0) throw new Error(email);
         return email;
       });
@@ -113,8 +133,16 @@
     state.token = null; state.tokenExpires = 0; state.onToken = null;
     if (token && google.accounts.oauth2.revoke) google.accounts.oauth2.revoke(token, function () {});
     if (wasIn) { location.reload(); return; }
-    toast(e && e.message ? e.message + ' can\'t use this app. Sign in with ' + (ALLOWED[0] || 'the PHLO account') + '.' :
+    signInError(e && e.problem ? e.message :
+      e && e.message ? e.message + ' can\'t use this app. Sign in with ' + (ALLOWED[0] || 'the PHLO account') + '.' :
       'Could not check which Google account signed in. Try again.');
+  }
+
+  /** Keeps a sign-in problem on screen (under the sign-in button) until the next try. */
+  function signInError(msg) {
+    var box = $('signin-error');
+    if (box) { box.textContent = msg; box.hidden = !msg; }
+    if (msg) toast(msg);
   }
 
   function afterSignIn(email) {
