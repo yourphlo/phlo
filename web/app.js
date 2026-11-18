@@ -14,6 +14,9 @@
 
   var $ = function (id) { return document.getElementById(id); };
   var state = { token: null, tokenExpires: 0, tokenClient: null, rows: [], built: null, checks: [] };
+  // Owner signs in with a long password checked by the dispatch script, which then reads Google for the page.
+  var PASSWORD = CFG.ownerLogin === 'password';
+  var OWNER_KEY = 'phlo.owner';
 
   /* ---------------- small helpers ---------------- */
 
@@ -63,6 +66,7 @@
   }
 
   function initAuth() {
+    if (PASSWORD) { initPasswordLogin(); return; }
     var id = clientId();
     $('setup').hidden = !!id;
     if (!id) return;
@@ -72,7 +76,14 @@
       client_id: id,
       scope: SCOPES,
       callback: function (resp) {
-        if (resp.error) { toast('Sign-in failed: ' + resp.error); return; }
+        if (resp.error) { signInError('Google sign-in did not finish (' + resp.error + '). Try again.'); return; }
+        var o2 = google.accounts.oauth2;
+        if (o2.hasGrantedAllScopes && !o2.hasGrantedAllScopes.apply(o2, [resp].concat(SCOPES.split(' ')))) {
+          if (o2.revoke) o2.revoke(resp.access_token, function () {});
+          signInError('Google signed you in, but not every permission box was ticked. Click Admin sign-in again and, ' +
+            'on Google\'s permission screen, tick ALL the boxes (or "Select all") before Continue.');
+          return;
+        }
         state.token = resp.access_token;
         state.tokenExpires = Date.now() + (resp.expires_in - 60) * 1000;
         checkAccount().then(function (email) {
@@ -84,12 +95,19 @@
   }
 
   function signIn(then) {
+    if (PASSWORD) {
+      var f = $('owner-login');
+      if (state.session) { signInError(''); toast('Your sign-in has expired. Sign in again.'); setTimeout(function () { location.reload(); }, 1500); return; }
+      signInError(''); f.elements.password.focus();
+      return;
+    }
     if (!state.tokenClient && clientId()) initAuth();
     if (!state.tokenClient) {
       toast(clientId() ? 'Google sign-in is still loading. Try again in a moment.' : 'Add the OAuth client ID first (setup box).');
       return;
     }
     state.onToken = then || null;
+    signInError('');
     state.tokenClient.requestAccessToken({ prompt: state.token ? '' : 'consent' });
   }
 
@@ -98,10 +116,22 @@
   /** Resolves with the signed-in account's email if it is allowed to use the app, else rejects with it. */
   function checkAccount() {
     return fetch('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)', { headers: { Authorization: 'Bearer ' + state.token } })
-      .then(function (res) { return res.ok ? res.json() : {}; })
+      .then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (r) {
+          if (!res.ok) {
+            var msg = String(r.error && r.error.message || ('HTTP ' + res.status));
+            var err = new Error(/has not been used|is disabled|SERVICE_DISABLED/i.test(msg) ?
+              'The Google Drive API is turned off in the Google Cloud project. Open console.cloud.google.com > ' +
+              'APIs & Services > Library, enable "Google Drive API" and "Google Sheets API", wait 2 minutes, then sign in again.' :
+              'Google refused to say which account signed in (' + msg + '). Try Admin sign-in again.');
+            err.problem = true; throw err;
+          }
+          return r;
+        });
+      })
       .then(function (r) {
         var email = String(r.user && r.user.emailAddress || '').toLowerCase();
-        if (!email) throw new Error('');
+        if (!email) { var e = new Error('Could not check which Google account signed in. Try again.'); e.problem = true; throw e; }
         if (ALLOWED.length && ALLOWED.indexOf(email) < 0) throw new Error(email);
         return email;
       });
@@ -113,8 +143,72 @@
     state.token = null; state.tokenExpires = 0; state.onToken = null;
     if (token && google.accounts.oauth2.revoke) google.accounts.oauth2.revoke(token, function () {});
     if (wasIn) { location.reload(); return; }
-    toast(e && e.message ? e.message + ' can\'t use this app. Sign in with ' + (ALLOWED[0] || 'the PHLO account') + '.' :
+    signInError(e && e.problem ? e.message :
+      e && e.message ? e.message + ' can\'t use this app. Sign in with ' + (ALLOWED[0] || 'the PHLO account') + '.' :
       'Could not check which Google account signed in. Try again.');
+  }
+
+  /* ---------------- owner password sign-in ---------------- */
+
+  function initPasswordLogin() {
+    if (state.pwReady) return;
+    state.pwReady = true;
+    $('setup').hidden = true;
+    $('signin-main').hidden = true;
+    var f = $('owner-login');
+    f.hidden = false;
+    f.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var pw = f.elements.password.value;
+      if (!pw) { signInError('Type the owner password.'); return; }
+      var btn = f.querySelector('button[type=submit]');
+      btn.disabled = true; signInError('');
+      phloBackend.call('admin.login', { password: pw }).then(function (r) {
+        f.elements.password.value = '';
+        try { sessionStorage.setItem(OWNER_KEY, JSON.stringify({ session: r.session, expires: r.expires, email: r.email })); } catch (err) { /* storage blocked */ }
+        usePasswordSession(r);
+      }, function (err) { signInError(err.message); }).then(function () { btn.disabled = false; });
+    });
+    // Still signed in from earlier in this tab (cleared when the tab closes or on Sign out).
+    var saved = null;
+    try { saved = JSON.parse(sessionStorage.getItem(OWNER_KEY) || 'null'); } catch (e) { /* storage blocked */ }
+    if (saved && saved.session && saved.expires > Date.now() + 60e3) usePasswordSession(saved);
+  }
+
+  function usePasswordSession(r) {
+    state.token = 'pw:' + r.session;
+    state.tokenExpires = r.expires - 60e3;
+    afterSignIn(r.email || ALLOWED[0] || 'PHLO owner');
+  }
+
+  /** api() for a password sign-in: the dispatch script makes the Google request and hands back the answer. */
+  function relay(url, asBuffer, init) {
+    init = init || {};
+    var headers = init.headers || {};
+    return phloBackend.call('admin.google', { googleToken: state.token, url: url, method: init.method || 'GET',
+      body: init.body || '', contentType: headers['Content-Type'] || '', binary: !!asBuffer }).then(function (r) {
+      if (r.status >= 300) {
+        var j = {}; try { j = JSON.parse(r.text || '{}'); } catch (e) { /* not JSON */ }
+        var msg = (j.error && j.error.message) || ('HTTP ' + r.status);
+        if (r.status === 404) msg = 'file not found or not shared with the PHLO account';
+        if (r.status === 403) msg = 'no access (' + msg + ')';
+        throw new Error(msg);
+      }
+      if (!asBuffer) return JSON.parse(r.text || '{}');
+      var bin = atob(r.base64 || ''), bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return bytes.buffer;
+    }, function (e) {
+      if (e.auth) { signIn(); }
+      throw e;
+    });
+  }
+
+  /** Keeps a sign-in problem on screen (under the sign-in button) until the next try. */
+  function signInError(msg) {
+    var box = $('signin-error');
+    if (box) { box.textContent = msg; box.hidden = !msg; }
+    if (msg) toast(msg);
   }
 
   function afterSignIn(email) {
@@ -135,6 +229,13 @@
   function signOut() {
     var token = state.token;
     $('signout').disabled = true;
+    if (PASSWORD) {
+      try { sessionStorage.removeItem(OWNER_KEY); } catch (e) { /* storage blocked */ }
+      state.token = null;
+      var done = function () { location.reload(); };
+      if (token) phloBackend.call('admin.logout', { googleToken: token }).then(done, done); else done();
+      return;
+    }
     if (token && google.accounts.oauth2.revoke) google.accounts.oauth2.revoke(token, function () {});
     state.token = null;
     location.reload();
@@ -146,6 +247,7 @@
   }
 
   function api(url, asBuffer, init) {
+    if (PASSWORD) return withToken().then(function () { return relay(url, asBuffer, init); });
     return withToken().then(function () {
       init = init || {};
       init.headers = Object.assign({ Authorization: 'Bearer ' + state.token }, init.headers || {});
@@ -593,7 +695,7 @@
     if (msg) { note.textContent = msg; return; }
     if (drv.saving) note.textContent = 'Saving…';
     else if (drv.synced && signedIn()) note.textContent = 'Saved to your Google account' + ($('who').textContent ? ' (' + $('who').textContent + ')' : '') + '. Sign in on any computer to see these drivers.';
-    else note.textContent = 'Saved on this device only. Sign in with Google to keep drivers in your Google account.';
+    else note.textContent = 'Saved on this device only. Sign in (Admin sign-in) to keep drivers in your Google account.';
   }
 
   function rosterIso() { return $('roster-date').value || isoDate(phloAddDays(todayLocal(), 1)); }
@@ -855,7 +957,7 @@
       $('pins-choose').hidden = true;
       $('pins-result').hidden = false;
       if (!phloBackend.enabled) toast('PINs saved. Drivers can sign in once the dispatch server is set up.');
-      else if (!signedIn()) toast('PINs saved on this device. Sign in with Google so drivers can use them.');
+      else if (!signedIn()) toast('PINs saved on this device. Use Admin sign-in so drivers can use them.');
     }).catch(function (e) { toast('Could not make PINs: ' + e.message); })
       .then(function () { $('pins-make').disabled = false; });
   }

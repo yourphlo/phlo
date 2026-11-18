@@ -210,6 +210,10 @@ are in your Downloads folder, so delete them there when you're done with them.
   workflow**. After that it republishes by itself whenever the code changes.
   The page is at `https://yourphlo.github.io/phlo/` (also shown in Settings > Pages).
 
+> **For now the owner signs in with a long password instead of Google** (`ownerLogin: 'password'` in
+> `web/config.js`): see *Owner password sign-in* in `apps-script-dispatch/README.md`. Step 2 below is only
+> needed for `ownerLogin: 'google'`.
+
 **2. Create the Google sign-in key (OAuth client ID)** at https://console.cloud.google.com
 
 1. Create a project (e.g. "PHLO").

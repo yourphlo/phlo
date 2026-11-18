@@ -52,6 +52,24 @@ Driver sign-in box appears on the start page.
 BAA only on some plans, and a free gmail.com account has no BAA with Google. Check with your compliance
 person before using it with patients.
 
+## Owner password sign-in (instead of Google sign-in)
+
+With `ownerLogin: 'password'` in `web/config.js` (the default for now), the office signs in to the page
+with a long password instead of Google. This script then reads the store sheets and keeps the drivers
+file as **yourphlo@gmail.com**, so those sheets must be shared with that account.
+
+1. Make up a long password: at least 20 characters, e.g. five or six random words. Keep it in a password
+   manager.
+2. In this Apps Script project: **Project Settings > Script properties > Add script property**:
+   `ADMIN_PASSWORD` = the password > **Save script properties**.
+3. Paste in the latest `Server.gs` and `appsscript.json`, then deploy a new version (below) and allow
+   the new permission it asks for (its own hidden app-data folder in Drive, for the drivers file).
+
+A sign-in lasts 12 hours or until **Sign out**, and only in that browser tab. Five wrong passwords lock
+it for 15 minutes. To change the password, edit `ADMIN_PASSWORD`. Everyone already signed in stays
+signed in until their 12 hours run out (or they sign out). To go back to Google sign-in, set
+`ownerLogin: 'google'` in `web/config.js`.
+
 ## Updating
 
 After changing `Server.gs` or `Texts.gs`: **Deploy > Manage deployments** > edit (pencil) > **Version: New

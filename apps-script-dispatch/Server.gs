@@ -20,6 +20,8 @@ var ADMINS = ['yourphlo@gmail.com'];      // Google accounts allowed to send rou
 var TIME_ZONE = 'America/Los_Angeles';
 var SESSION_HOURS = 16;                    // how long a driver stays signed in
 var MAX_TRIES = 5, LOCK_MINUTES = 15;      // wrong PINs before a username is locked for a while
+var ADMIN_HOURS = 12;                      // how long an owner password sign-in lasts
+var MIN_PASSWORD = 20;                     // shortest owner password accepted (Script property ADMIN_PASSWORD)
 var FOLDER_NAME = 'PHLO Dispatch';
 var PAGE_URL = 'https://yourphlo.github.io/phlo/'; // the PHLO page (patients' reply links point here)
 
@@ -64,7 +66,7 @@ var ACTIONS = {
     // Sessions of drivers who were removed or lost their PIN end now.
     var ids = {};
     Object.keys(accounts).forEach(function (u) { if (accounts[u].hash) ids[accounts[u].id] = true; });
-    eachSession_(function (key, s) { if (s.role !== 'rx' && !ids[s.driverId]) props_().deleteProperty(key); });
+    eachSession_(function (key, s) { if (!s.role && !ids[s.driverId]) props_().deleteProperty(key); });
     return { accounts: Object.keys(accounts).length };
   },
 
@@ -196,6 +198,53 @@ var ACTIONS = {
   'admin.file': function (req) {
     admin_(req);
     return { dataUrl: fileDataUrl_(req.fileId) };
+  },
+
+  // Owner sign-in with the long password in Script properties > ADMIN_PASSWORD (instead of Google sign-in).
+  'admin.login': function (req) {
+    var want = String(props_().getProperty('ADMIN_PASSWORD') || '');
+    if (want.length < MIN_PASSWORD) throw authError_('Owner password is not set up yet: in the dispatch script, Project Settings > ' +
+      'Script properties, add ADMIN_PASSWORD (at least ' + MIN_PASSWORD + ' characters).');
+    var cache = CacheService.getScriptCache(), key = 'fails_admin';
+    var fails = +(cache.get(key) || 0);
+    if (fails >= MAX_TRIES) throw authError_('Too many wrong tries. Wait ' + LOCK_MINUTES + ' minutes and try again.');
+    var salt = Utilities.getUuid();
+    if (hash_(salt, String(req.password || '')) !== hash_(salt, want)) {
+      cache.put(key, String(fails + 1), LOCK_MINUTES * 60);
+      throw authError_('Wrong password.');
+    }
+    cache.remove(key);
+    var token = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
+    var exp = Date.now() + ADMIN_HOURS * 3600e3;
+    eachSession_(function (k, s) { if (s.exp < Date.now()) props_().deleteProperty(k); });
+    props_().setProperty('sess_' + token, JSON.stringify({ role: 'admin', exp: exp }));
+    return { session: token, email: ADMINS[0], expires: exp };
+  },
+
+  'admin.logout': function (req) {
+    var t = String(req.googleToken || '');
+    if (t.indexOf('pw:') === 0) props_().deleteProperty('sess_' + t.slice(3));
+    return {};
+  },
+
+  // For a password sign-in: the page's Google Drive / Sheets reads (and the drivers file save) go through
+  // here and run as the Google account that deployed this script.
+  'admin.google': function (req) {
+    admin_(req);
+    var url = String(req.url || ''), method = String(req.method || 'get').toLowerCase();
+    var ok = /^https:\/\/sheets\.googleapis\.com\/v4\/spreadsheets\/[\w-]+(\?|\/values:batchGet\?)/.test(url) ||
+      /^https:\/\/www\.googleapis\.com\/drive\/v3\/files(\?|\/[\w-]+\?)/.test(url) ||
+      /^https:\/\/www\.googleapis\.com\/upload\/drive\/v3\/files(\?|\/[\w-]+\?)/.test(url);
+    if (!ok || ['get', 'post', 'patch'].indexOf(method) < 0 || (method !== 'get' && url.indexOf('/upload/') < 0)) {
+      throw new Error('That Google request is not allowed.');
+    }
+    var opt = { method: method, muteHttpExceptions: true, headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() } };
+    if (method !== 'get') { opt.payload = String(req.body || ''); opt.contentType = String(req.contentType || 'application/json'); }
+    var res = UrlFetchApp.fetch(url, opt);
+    var out = { status: res.getResponseCode() };
+    if (req.binary && out.status < 300) out.base64 = Utilities.base64Encode(res.getContent());
+    else out.text = res.getContentText();
+    return out;
   },
 
   'driver.login': function (req) {
@@ -457,7 +506,13 @@ function isoDate_(v) {
 /** Checks the Google sign-in token the PHLO page sends and that it belongs to an admin account. */
 function admin_(req) {
   var token = String(req.googleToken || '');
-  if (!token) throw authError_('Sign in with Google first.');
+  if (!token) throw authError_('Sign in first.');
+  if (token.indexOf('pw:') === 0) {
+    var raw = props_().getProperty('sess_' + token.slice(3));
+    var s = raw && JSON.parse(raw);
+    if (!s || s.role !== 'admin' || s.exp < Date.now()) throw authError_('Your sign-in has expired. Sign in again.');
+    return ADMINS[0];
+  }
   var cache = CacheService.getScriptCache();
   var key = 'adm_' + hash_('admin', token).slice(0, 40);
   var email = cache.get(key);
@@ -481,7 +536,7 @@ function session_(req) {
 
 function driverSession_(req) {
   var s = session_(req);
-  if (s.role === 'rx') throw authError_('Please sign in again.');
+  if (s.role) throw authError_('Please sign in again.');
   return s;
 }
 
